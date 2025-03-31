@@ -187,6 +187,41 @@ class KnowledgeGraphManager {
   
     return filteredGraph;
   }
+
+  async getEntityNetwork(entityName: string): Promise<KnowledgeGraph> {
+    const graph = await this.loadGraph();
+    
+    // 1. 查找指定的实体
+    const targetEntity = graph.entities.find(e => e.name === entityName);
+    if (!targetEntity) {
+      return { entities: [], relations: [] };
+    }
+    
+    // 2. 找出所有与该实体相关的关系（包括from和to两个方向）
+    const relatedRelations = graph.relations.filter(r => 
+      r.from === entityName || r.to === entityName
+    );
+    
+    // 3. 收集所有与这些关系相关的其他实体名称
+    const relatedEntityNames = new Set<string>();
+    relatedEntityNames.add(entityName); // 添加目标实体本身
+    
+    relatedRelations.forEach(r => {
+      relatedEntityNames.add(r.from);
+      relatedEntityNames.add(r.to);
+    });
+    
+    // 4. 获取所有相关实体的详细信息
+    const relatedEntities = graph.entities.filter(e => 
+      relatedEntityNames.has(e.name)
+    );
+    
+    // 5. 返回包含目标实体网络的子图
+    return {
+      entities: relatedEntities,
+      relations: relatedRelations
+    };
+  }
 }
 
 const knowledgeGraphManager = new KnowledgeGraphManager();
@@ -383,6 +418,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["names"],
         },
       },
+      {
+        name: "get_entity_network",
+        description: "获取指定实体的完整网络，包括该实体本身以及所有与其直接相关的实体和关系",
+        inputSchema: {
+          type: "object",
+          properties: {
+            entityName: { 
+              type: "string", 
+              description: "要检索网络的实体名称" 
+            },
+          },
+          required: ["entityName"],
+        },
+      },
     ],
   };
 });
@@ -416,6 +465,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.searchNodes(args.query as string), null, 2) }] };
     case "open_nodes":
       return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
+    case "get_entity_network":
+      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.getEntityNetwork(args.entityName as string), null, 2) }] };
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
