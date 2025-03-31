@@ -10,15 +10,14 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+console.error("MEMORY_FILE_PATH env:", process.env.MEMORY_FILE_PATH);
+
 // Define memory file path using environment variable with fallback
 const defaultMemoryPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'memory.json');
+const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH || defaultMemoryPath;
 
-// If MEMORY_FILE_PATH is just a filename, put it in the same directory as the script
-const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH
-  ? path.isAbsolute(process.env.MEMORY_FILE_PATH)
-    ? process.env.MEMORY_FILE_PATH
-    : path.join(path.dirname(fileURLToPath(import.meta.url)), process.env.MEMORY_FILE_PATH)
-  : defaultMemoryPath;
+// Log the final path being used
+console.error("Using memory file path:", MEMORY_FILE_PATH);
 
 // We are storing our memory using entities, relations, and observations in a graph structure
 interface Entity {
@@ -408,6 +407,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+  // Ensure the directory exists
+  const memoryDir = path.dirname(MEMORY_FILE_PATH);
+  try {
+    await fs.mkdir(memoryDir, { recursive: true });
+    
+    // Check if file exists, if not create an empty one
+    try {
+      await fs.access(MEMORY_FILE_PATH);
+    } catch (error) {
+      // File doesn't exist, create an empty knowledge graph file
+      console.error(`Memory file not found, creating empty one at: ${MEMORY_FILE_PATH}`);
+      await fs.writeFile(MEMORY_FILE_PATH, '');
+    }
+  } catch (error) {
+    console.error("Error ensuring memory file exists:", error);
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Knowledge Graph MCP Server running on stdio");
