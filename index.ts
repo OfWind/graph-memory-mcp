@@ -30,6 +30,7 @@ interface Relation {
   from: string;
   to: string;
   relationType: string;
+  properties: string[];
 }
 
 interface KnowledgeGraph {
@@ -75,11 +76,17 @@ class KnowledgeGraphManager {
 
   async createRelations(relations: Relation[]): Promise<Relation[]> {
     const graph = await this.loadGraph();
-    const newRelations = relations.filter(r => !graph.relations.some(existingRelation => 
-      existingRelation.from === r.from && 
-      existingRelation.to === r.to && 
-      existingRelation.relationType === r.relationType
-    ));
+    const newRelations = relations.filter(r => {
+      if (!r.properties) {
+        r.properties = [];
+      }
+      
+      return !graph.relations.some(existingRelation => 
+        existingRelation.from === r.from && 
+        existingRelation.to === r.to && 
+        existingRelation.relationType === r.relationType
+      );
+    });
     graph.relations.push(...newRelations);
     await this.saveGraph(graph);
     return newRelations;
@@ -200,7 +207,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "create_entities",
-        description: "Create multiple new entities in the knowledge graph",
+        description: "创建新实体到知识图谱中。每个实体的observations必须包含完整详细的信息，每项信息应单独成为数组中的一个元素，格式为'属性: 详细描述'",
         inputSchema: {
           type: "object",
           properties: {
@@ -209,16 +216,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: {
                 type: "object",
                 properties: {
-                  name: { type: "string", description: "The name of the entity" },
-                  entityType: { type: "string", description: "The type of the entity" },
+                  name: { type: "string", description: "实体的名称" },
+                  entityType: { type: "string", description: "实体的类型，如'人物'、'物品'、'组织'、'世界观'、'力量体系'、'事件'等" },
                   observations: { 
                     type: "array", 
                     items: { type: "string" },
-                    description: "An array of observation contents associated with the entity"
+                    description: "与实体相关的完整观察内容数组，应包含完整的信息，如类型为'人物'时，年龄: XX岁'、'性别: 男/女'、'身份: ...'、'记忆点: ...'、'定位: ...'、'人物冲突: ...'、'外貌特征: ...'、'背景故事: ...'、'性格特点: ...'、'能力: ...'、'弱点: ...'、'人际关系: ...'、'人物成长: ...'、'特殊设定: ...'等"
                   },
                 },
                 required: ["name", "entityType", "observations"],
               },
+              description: "要创建的实体对象，每个实体都应有详尽的observations"
             },
           },
           required: ["entities"],
@@ -226,7 +234,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "create_relations",
-        description: "Create multiple new relations between entities in the knowledge graph. Relations should be in active voice",
+        description: "在知识图谱中创建多个新关系。关系应该使用主动语态，每个关系必须包含详细的properties信息，描述关系的各个方面，每项信息应单独成为数组中的一个元素，格式为'属性: 详细描述'",
         inputSchema: {
           type: "object",
           properties: {
@@ -235,12 +243,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: {
                 type: "object",
                 properties: {
-                  from: { type: "string", description: "The name of the entity where the relation starts" },
-                  to: { type: "string", description: "The name of the entity where the relation ends" },
-                  relationType: { type: "string", description: "The type of the relation" },
+                  from: { type: "string", description: "关系起始实体的名称" },
+                  to: { type: "string", description: "关系指向实体的名称" },
+                  relationType: { type: "string", description: "关系的类型，如'雇佣'、'朋友'、'敌人'等" },
+                  properties: { 
+                    type: "array", 
+                    items: { type: "string" },
+                    description: "关系的详细属性数组，包含关系的各方面信息，比如人物中可能会存在'关系起始时间: ...'、'关系地点: ...'、'亲密度: ...'、'互相称呼: ...'等"
+                  },
                 },
-                required: ["from", "to", "relationType"],
+                required: ["from", "to", "relationType", "properties"],
               },
+              description: "要创建的关系对象，每个关系都应有详尽的properties"
             },
           },
           required: ["relations"],
@@ -261,11 +275,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   contents: { 
                     type: "array", 
                     items: { type: "string" },
-                    description: "An array of observation contents to add"
+                    description: "An array of observation contents to add, format as 'XX章节更新内容: 详细内容'"
                   },
                 },
                 required: ["entityName", "contents"],
               },
+              description: "添加新的观察内容到现有实体中。新添加的观察内容应单独成为数组中的一个元素，格式为'XX章节更新内容: 详细内容'",
             },
           },
           required: ["observations"],
