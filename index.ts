@@ -9,6 +9,7 @@ import {
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { outlineTools } from './outline-tools.js';
 
 console.error("MEMORY_FILE_PATH env:", process.env.MEMORY_FILE_PATH);
 
@@ -432,6 +433,108 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["entityName"],
         },
       },
+      {
+        name: "get_volume_info",
+        description: "获取指定卷的基本信息，包括卷标题、章节数目、核心矛盾等，但不包含详细章节内容",
+        inputSchema: {
+          type: "object",
+          properties: {
+            volumeIndex: { 
+              type: "number", 
+              description: "卷的索引，从0开始" 
+            },
+          },
+          required: ["volumeIndex"],
+        },
+      },
+      {
+        name: "get_chapter_outline_window",
+        description: "获取指定章节及其前后N章的大纲信息（非章节全文），形成一个滑动窗口，便于规划和了解上下文。返回的是章节的剧情说明、情绪点、章末悬念、剧情点等计划内容，不包含章节的具体文字。",
+        inputSchema: {
+          type: "object",
+          properties: {
+            centerChapterIndex: { 
+              type: "number", 
+              description: "中心章节的索引，通常是当前正在计划撰写的章节" 
+            },
+            windowSize: { 
+              type: "number", 
+              description: "窗口大小，指定要获取中心章节前后各多少章的大纲信息，默认为2" 
+            },
+          },
+          required: ["centerChapterIndex"],
+        },
+      },
+      {
+        name: "get_chapter_outline_by_index",
+        description: "获取特定索引章节的大纲信息（非章节全文），包括剧情概要、情绪点、悬念等计划内容，不包含章节的具体文字。",
+        inputSchema: {
+          type: "object",
+          properties: {
+            chapterIndex: { 
+              type: "number", 
+              description: "章节的索引" 
+            },
+          },
+          required: ["chapterIndex"],
+        },
+      },
+      {
+        name: "update_outline",
+        description: "更新大纲的特定部分，可以更新卷、幕、情节点或章节的信息",
+        inputSchema: {
+          type: "object",
+          properties: {
+            volumeIndex: { 
+              type: "number", 
+              description: "要更新的卷的索引" 
+            },
+            actIndex: { 
+              type: "number", 
+              description: "要更新的幕的索引（可选）" 
+            },
+            plotPointIndex: { 
+              type: "number", 
+              description: "要更新的情节点的索引（可选）" 
+            },
+            chapterIndex: { 
+              type: "number", 
+              description: "要更新的章节的索引（可选）" 
+            },
+            newData: { 
+              type: "object", 
+              description: "新的数据内容" 
+            },
+          },
+          required: ["volumeIndex", "newData"],
+        },
+      },
+      {
+        name: "add_outline",
+        description: "添加或创建大纲内容，严格按照大纲层次结构：outline(顶层) > volume(卷) > acts(幕) > plot_points(情节点) > chapters(章节)。添加时必须遵循层次关系，例如添加act前必须先有volume，添加plot_point前必须先有act。参数中volumeIndex指定在哪个卷操作，actIndex指定在哪个幕操作，plotPointIndex指定在哪个情节点操作。",
+        inputSchema: {
+          type: "object",
+          properties: {
+            volumeIndex: { 
+              type: "number", 
+              description: "卷的索引位置。添加新卷时，使用现有卷数量作为索引可在末尾添加；使用0可在开头添加"
+            },
+            newData: { 
+              type: "object", 
+              description: "要添加的新内容。添加volume时需包含volume字段；添加act时需包含act_name字段；添加plot_point时需包含plot_point_name字段；添加chapter时需包含chapter_name和chapter_index字段" 
+            },
+            actIndex: { 
+              type: "number", 
+              description: "要添加到哪个幕中。不提供此参数表示添加卷；提供此参数表示在指定卷中添加幕或操作幕"
+            },
+            plotPointIndex: { 
+              type: "number", 
+              description: "要添加到哪个情节点中。不提供此参数表示添加幕；提供此参数表示在指定幕中添加情节点" 
+            }
+          },
+          required: ["volumeIndex", "newData"],
+        },
+      },
     ],
   };
 });
@@ -467,6 +570,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
     case "get_entity_network":
       return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.getEntityNetwork(args.entityName as string), null, 2) }] };
+    case "get_volume_info":
+      return { 
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify(await outlineTools.getVolumeInfo(Number(args.volumeIndex)), null, 2) 
+        }] 
+      };
+    case "get_chapter_outline_window":
+      return { 
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify(await outlineTools.getChapterOutlineWindow(Number(args.centerChapterIndex), Number(args.windowSize)), null, 2) 
+        }] 
+      };
+    case "get_chapter_outline_by_index":
+      return { 
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify(await outlineTools.getChapterOutlineByIndex(Number(args.chapterIndex)), null, 2) 
+        }] 
+      };
+    case "update_outline":
+      return { 
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify(await outlineTools.updateOutline(
+            Number(args.volumeIndex),
+            args.newData,
+            Number(args.actIndex), 
+            Number(args.plotPointIndex), 
+            Number(args.chapterIndex)
+          ), null, 2) 
+        }] 
+      };
+    case "add_outline":
+      return { 
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify(await outlineTools.addOutline(
+            args.newData,
+            args.volumeIndex !== undefined ? Number(args.volumeIndex) : undefined,
+            args.actIndex !== undefined ? Number(args.actIndex) : undefined, 
+            args.plotPointIndex !== undefined ? Number(args.plotPointIndex) : undefined
+          ), null, 2) 
+        }] 
+      };
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
