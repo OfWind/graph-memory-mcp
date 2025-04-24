@@ -2,8 +2,26 @@ import { promises as fs } from 'fs';
 import * as yaml from 'js-yaml';
 import path from 'path';
 
+// 添加日志帮助函数
+function log(message: string, data?: any) {
+  const logMessage = data 
+    ? `[OUTLINE-TOOLS] ${message}: ${JSON.stringify(data, null, 2)}`
+    : `[OUTLINE-TOOLS] ${message}`;
+    
+  // 同时输出到控制台
+  console.log(logMessage);
+  
+  // 写入文件
+  fs.appendFile('mcp-outline-tools.log', logMessage + '\n')
+    .catch(err => console.error('Error writing to log file:', err));
+}
+
+// 在模块开始时记录初始化
+log('模块初始化开始');
+
 // 定义环境变量或使用默认值
 const OUTLINE_FILE_PATH = process.env.OUTLINE_FILE_PATH || 'outline.yaml';
+log(`使用大纲文件路径: ${OUTLINE_FILE_PATH}`);
 
 // 大纲结构接口定义
 interface Chapter {
@@ -49,26 +67,35 @@ interface Outline {
 }
 
 async function readOutlineFile(): Promise<Outline> {
+  log('开始读取大纲文件');
   try {
+    log(`尝试读取文件: ${OUTLINE_FILE_PATH}`);
     const fileContent = await fs.readFile(OUTLINE_FILE_PATH, 'utf8');
-    return yaml.load(fileContent) as Outline;
+    log('读取成功，正在解析YAML');
+    const result = yaml.load(fileContent) as Outline;
+    log('解析完成', { volumeCount: result.outline?.length });
+    return result;
   } catch (error) {
     console.error(`Error reading outline file: ${error}`);
     
     // 如果文件不存在，创建一个空的outline文件
     if (error instanceof Error && 'code' in error && (error as any).code === "ENOENT") {
+      log('文件不存在，创建空大纲');
       const emptyOutline: Outline = { outline: [] };
       
       try {
         // 确保目录存在
         const directory = path.dirname(OUTLINE_FILE_PATH);
+        log(`创建目录: ${directory}`);
         await fs.mkdir(directory, { recursive: true });
         
         // 创建空文件
         const yamlContent = yaml.dump(emptyOutline);
+        log(`写入空大纲到: ${OUTLINE_FILE_PATH}`);
         await fs.writeFile(OUTLINE_FILE_PATH, yamlContent, 'utf8');
         console.error(`Created empty outline file at: ${OUTLINE_FILE_PATH}`);
       } catch (writeError) {
+        log(`创建文件失败: ${writeError}`);
         console.error(`Failed to create outline file: ${writeError}`);
       }
       
@@ -76,6 +103,7 @@ async function readOutlineFile(): Promise<Outline> {
     }
     
     // 其他错误
+    log(`读取文件时遇到未知错误: ${error}`);
     throw error;
   }
 }
@@ -117,6 +145,7 @@ export async function getVolumeInfo(volumeIndex: number): Promise<Volume | null>
 
 // 工具2: 获取指定章节及其前后N章的信息
 export async function getChapterOutlineWindow(centerChapterIndex: number, windowSize: number = 2): Promise<Chapter[]> {
+  log(`获取章节窗口 - 中心章节: ${centerChapterIndex}, 窗口大小: ${windowSize}`);
   const outline = await readOutlineFile();
   const allChapters: Chapter[] = [];
   
@@ -126,6 +155,7 @@ export async function getChapterOutlineWindow(centerChapterIndex: number, window
       act.plot_points?.forEach(plotPoint => {
         if (plotPoint.chapters) {
           allChapters.push(...plotPoint.chapters);
+          log(`从情节点 "${plotPoint.plot_point_name}" 添加 ${plotPoint.chapters.length} 章`);
         }
       });
     });
@@ -133,19 +163,28 @@ export async function getChapterOutlineWindow(centerChapterIndex: number, window
   
   // 根据chapter_index排序
   allChapters.sort((a, b) => a.chapter_index - b.chapter_index);
+  log(`总共收集了 ${allChapters.length} 章, 排序后的章节索引: ${allChapters.map(ch => ch.chapter_index).join(', ')}`);
   
   // 查找中心章节的位置
   const centerIndex = allChapters.findIndex(ch => ch.chapter_index === centerChapterIndex);
+  log(`中心章节在数组中的位置: ${centerIndex}`);
   if (centerIndex === -1) {
+    log(`未找到中心章节 ${centerChapterIndex}`);
     return [];
   }
   
   // 计算窗口范围
   const startIndex = Math.max(0, centerIndex - windowSize);
   const endIndex = Math.min(allChapters.length - 1, centerIndex + windowSize);
+  log(`窗口范围 - 开始索引: ${startIndex}, 结束索引: ${endIndex}`);
   
   // 返回窗口内的章节
-  return allChapters.slice(startIndex, endIndex + 1);
+  const result = allChapters.slice(startIndex, endIndex + 1);
+  log(`返回章节窗口, 包含 ${result.length} 章`, result.map(ch => ({ 
+    index: ch.chapter_index, 
+    name: ch.chapter_name 
+  })));
+  return result;
 }
 
 // 工具3: 获取特定索引的章节信息
@@ -416,5 +455,8 @@ export const outlineTools = {
   updateOutline,
   addOutline
 };
+
+// 在文件末尾添加初始化日志
+log('模块导出完成');
 
 export default outlineTools;
