@@ -1,10 +1,11 @@
 import { promises as fs } from 'fs';
 import * as yaml from 'js-yaml';
 import path from 'path';
+import { PATHS } from './storage-manager.js';
 
 // --- 配置与常量 ---
-const OUTLINE_JSON_PATH = process.env.OUTLINE_JSON_PATH || 'outline-v2.json';
-const LOG_FILE_PATH = 'mcp-outline-tools-v2.log';
+const OUTLINE_JSON_PATH = process.env.OUTLINE_JSON_PATH || PATHS.OUTLINE_JSON_FILE;
+const LOG_FILE_PATH = PATHS.OUTLINE_LOG_FILE;
 
 // --- 日志功能 ---
 async function log(message: string, data?: any) {
@@ -518,12 +519,13 @@ class OutlineManager  {
   
   // --- 导入/迁移功能 ---
   
+  // 处理YAML转换中的文件路径
   async convertYAMLToJSON(): Promise<boolean> {
     await log('Starting YAML to JSON conversion');
     
     try {
       // 读取YAML文件
-      const yamlFilePath = process.env.OUTLINE_FILE_PATH || 'outline.yaml';
+      const yamlFilePath = process.env.OUTLINE_FILE_PATH || PATHS.OUTLINE_YAML_FILE;
       await log(`Reading YAML from: ${yamlFilePath}`);
       
       const fileContent = await fs.readFile(yamlFilePath, 'utf8');

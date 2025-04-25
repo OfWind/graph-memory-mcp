@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { PATHS } from './storage-manager.js';
 
 // 重新定义章节摘要的接口，使用英文字段名
 export interface ChapterSummary {
@@ -31,12 +31,14 @@ class ChapterSummaryManager {
 
   constructor(filePath: string) {
     this.filePath = filePath;
-    console.log(`ChapterSummaryManager initialized with file path: ${this.filePath}`);
+    console.error(`ChapterSummaryManager initialized with file path: ${this.filePath}`);
   }
 
   // 初始化和加载数据
-  private async initialize(): Promise<void> {
-    if (this.initialized) return;
+  private async initialize(forceReload: boolean = false): Promise<void> {
+    if (this.initialized && !forceReload) return;
+    
+    console.error(`Loading chapter summaries from: ${this.filePath}`);
     
     try {
       // 确保目录存在
@@ -48,8 +50,9 @@ class ChapterSummaryManager {
         const data = await fs.readFile(this.filePath, 'utf8');
         const parsed = JSON.parse(data) as ChapterSummaryStore;
         this.summaries = parsed.summaries || {};
+        console.error(`Successfully loaded ${Object.keys(this.summaries).length} chapter summaries`);
       } catch (e) {
-        console.log('No existing chapter summaries file found or invalid format, creating new store');
+        console.error(`No existing chapter summaries file found or invalid format: ${e instanceof Error ? e.message : String(e)}`);
         this.summaries = {};
         // 创建初始文件
         await this.save();
@@ -69,12 +72,14 @@ class ChapterSummaryManager {
       lastUpdated: new Date().toISOString()
     };
     
+    console.error(`Saving ${Object.keys(this.summaries).length} summaries to: ${this.filePath}`);
     await fs.writeFile(this.filePath, JSON.stringify(store, null, 2), 'utf8');
   }
 
   // 存储章节总结
   async storeSummary(chapterKey: string, summary: ChapterSummary): Promise<ChapterSummary> {
     await this.initialize();
+    console.error(`Storing summary for chapter ${chapterKey}: ${summary.title}`);
     this.summaries[chapterKey] = summary;
     await this.save();
     return summary;
@@ -82,13 +87,20 @@ class ChapterSummaryManager {
 
   // 获取特定章节总结
   async getSummary(chapterKey: string): Promise<ChapterSummary | null> {
-    await this.initialize();
-    return this.summaries[chapterKey] || null;
+    await this.initialize(true); // 强制重新加载
+    const summary = this.summaries[chapterKey] || null;
+    if (summary) {
+      console.error(`Found summary for chapter ${chapterKey}: ${summary.title}`);
+    } else {
+      console.error(`No summary found for chapter ${chapterKey}`);
+    }
+    return summary;
   }
 
   // 获取所有章节总结
   async getAllSummaries(): Promise<Record<string, ChapterSummary>> {
-    await this.initialize();
+    await this.initialize(true); // 强制重新加载
+    console.error(`Retrieved ${Object.keys(this.summaries).length} chapter summaries`);
     return this.summaries;
   }
 
@@ -96,6 +108,7 @@ class ChapterSummaryManager {
   async deleteSummary(chapterKey: string): Promise<boolean> {
     await this.initialize();
     if (this.summaries[chapterKey]) {
+      console.error(`Deleting summary for chapter ${chapterKey}`);
       delete this.summaries[chapterKey];
       await this.save();
       return true;
@@ -104,10 +117,10 @@ class ChapterSummaryManager {
   }
 }
 
-// 确定存储文件路径
-const defaultSummaryPath = process.env.CHAPTER_SUMMARY_PATH || 'chapter-summaries.json';
+// 使用统一的路径
+const summaryFilePath = process.env.CHAPTER_SUMMARY_PATH || PATHS.CHAPTER_SUMMARY_FILE;
 
 // 创建导出的单例实例
-export const chapterSummaryManager = new ChapterSummaryManager(defaultSummaryPath);
+export const chapterSummaryManager = new ChapterSummaryManager(summaryFilePath);
 
 export default chapterSummaryManager;

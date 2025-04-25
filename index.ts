@@ -5,17 +5,15 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { promises as fs } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { outlineTools } from './outline-tools.js';  // 保留旧工具的导入以向后兼容
-import { outlineToolsV2 } from './outline-tools-v2.js';  // 导入新工具
+import { outlineTools } from './outline-tools.js';
+import { outlineToolsV2 } from './outline-tools-v2.js';
 import { chapterSummaryManager, ChapterSummary } from './chapter-summary.js';
+import { PATHS, ensureStorageExists } from './storage-manager.js';
 
 console.error("MEMORY_FILE_PATH env:", process.env.MEMORY_FILE_PATH);
 
 // Define memory file path using environment variable with fallback
-const defaultMemoryPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'memory.json');
-const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH || defaultMemoryPath;
+const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH || PATHS.MEMORY_FILE;
 
 // Log the final path being used
 console.error("Using memory file path:", MEMORY_FILE_PATH);
@@ -968,22 +966,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
-  // 确保目录存在
-  const memoryDir = path.dirname(MEMORY_FILE_PATH);
-  try {
-    await fs.mkdir(memoryDir, { recursive: true });
-    
-    // 检查文件是否存在，如果不存在就创建一个空的
-    try {
-      await fs.access(MEMORY_FILE_PATH);
-    } catch (error) {
-      console.error(`Memory file not found, creating empty one at: ${MEMORY_FILE_PATH}`);
-      await fs.writeFile(MEMORY_FILE_PATH, '');
-    }
-  } catch (error) {
-    console.error("Error ensuring memory file exists:", error);
-  }
-
+  // 确保存储目录和文件存在
+  await ensureStorageExists();
+  
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Knowledge Graph & Outline (4B) MCP Server running on stdio");
