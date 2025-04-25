@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { outlineTools } from './outline-tools.js';  // 保留旧工具的导入以向后兼容
 import { outlineToolsV2 } from './outline-tools-v2.js';  // 导入新工具
+import { chapterSummaryManager, ChapterSummary } from './chapter-summary.js';
 
 console.error("MEMORY_FILE_PATH env:", process.env.MEMORY_FILE_PATH);
 
@@ -654,11 +655,90 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     },
   ];
 
+  // 添加章节总结工具
+  const chapterSummaryTools = [
+    {
+      name: "summarize_and_store_chapter",
+      description: "总结章节剧情并以结构化方式存储。提供三幕结构、剧情概要、关键地点、背景设定、人物行为、道具能力以及结尾悬念等信息。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          chapterId: { 
+            type: "string", 
+            description: "章节的唯一标识符，可以是章节索引(如'10')或路径(如'/v1/a1/p1/c10')" 
+          },
+          summary: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "章节标题，如'第10章 难得的喘息之机'" },
+              threeActStructure: {
+                type: "object",
+                properties: {
+                  beginning: { type: "string", description: "章节开始部分的简短概括 (起)" },
+                  middle: { type: "string", description: "章节中间部分的简短概括 (承)" },
+                  end: { type: "string", description: "章节结尾部分的简短概括 (转)" }
+                },
+                required: ["beginning", "middle", "end"]
+              },
+              plotSummary: { type: "string", description: "章节整体剧情的详细概括" },
+              keyLocations: { 
+                type: "array", 
+                items: { type: "string" },
+                description: "章节中出现的重要场景和地点" 
+              },
+              worldBuilding: { 
+                type: "array", 
+                items: { type: "string" },
+                description: "章节中揭示的世界观、背景或设定信息" 
+              },
+              characterActions: { 
+                type: "array", 
+                items: { type: "string" },
+                description: "主要角色在本章的关键行为和发展" 
+              },
+              keyItems: { 
+                type: "array", 
+                items: { type: "string" },
+                description: "章节中出现的重要道具、法术或能力" 
+              },
+              endingSuspense: { type: "string", description: "章节结尾引发的悬念或为后续剧情埋下的伏笔" }
+            },
+            required: ["title", "threeActStructure", "plotSummary", "keyLocations", "characterActions", "endingSuspense"]
+          }
+        },
+        required: ["chapterId", "summary"]
+      }
+    },
+    {
+      name: "get_all_chapter_summaries",
+      description: "获取所有已存储的章节剧情总结",
+      inputSchema: {
+        type: "object",
+        properties: {}
+      }
+    },
+    {
+      name: "get_chapter_summary",
+      description: "获取特定章节的剧情总结",
+      inputSchema: {
+        type: "object",
+        properties: {
+          chapterId: { 
+            type: "string", 
+            description: "要获取的章节标识符，可以是章节索引(如'10')或路径(如'/v1/a1/p1/c10')" 
+          }
+        },
+        required: ["chapterId"]
+      }
+    }
+  ];
+
   return {
     tools: [
       ...knowledgeGraphTools,
       ...legacyOutlineTools,     // 保留旧版本的工具函数
-      ...outlineManagementTools  // 添加新的路径式工具函数
+      ...outlineManagementTools, // 添加新的路径式工具函数
+      ...chapterSummaryTools     // 添加章节总结工具
     ],
   };
 });
@@ -813,6 +893,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             type: "text",
             text: JSON.stringify({ 
               success: await outlineToolsV2.convertYAMLToJSON() 
+            }, null, 2)
+          }]
+        };
+      
+      // --- 章节总结工具 ---
+      case "summarize_and_store_chapter":
+        const { chapterId, summary } = args as { chapterId: string, summary: ChapterSummary };
+        const storedSummary = await chapterSummaryManager.storeSummary(chapterId, summary);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `成功存储章节 ${summary.title} 的总结`,
+              data: storedSummary
+            }, null, 2)
+          }]
+        };
+        
+      case "get_all_chapter_summaries":
+        const allSummaries = await chapterSummaryManager.getAllSummaries();
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              count: Object.keys(allSummaries).length,
+              data: allSummaries
+            }, null, 2)
+          }]
+        };
+        
+      case "get_chapter_summary":
+        const requestedChapterId = (args as { chapterId: string }).chapterId;
+        const chapterSummary = await chapterSummaryManager.getSummary(requestedChapterId);
+        
+        if (!chapterSummary) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: false,
+                message: `未找到章节 ${requestedChapterId} 的总结`
+              }, null, 2)
+            }]
+          };
+        }
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              data: chapterSummary
             }, null, 2)
           }]
         };
