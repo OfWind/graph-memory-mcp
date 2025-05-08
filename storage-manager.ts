@@ -21,6 +21,9 @@ export const PATHS = {
   // 章节总结文件
   CHAPTER_SUMMARY_FILE: path.join(STORAGE_DIR, 'chapter-summaries.json'),
   
+  // 场景描述文件
+  SCENE_DESCRIPTION_FILE: path.join(STORAGE_DIR, 'scene-descriptions.json'),
+  
   // 日志文件
   OUTLINE_LOG_FILE: path.join(STORAGE_DIR, 'mcp-outline-tools-v2.log')
 };
@@ -39,6 +42,7 @@ export async function ensureStorageExists(): Promise<void> {
     await ensureFileExists(PATHS.MEMORY_FILE, '');
     await ensureFileExists(PATHS.OUTLINE_JSON_FILE, '{"volumes":{},"acts":{},"plotPoints":{},"chapters":{}}');
     await ensureFileExists(PATHS.CHAPTER_SUMMARY_FILE, '{"summaries":{},"lastUpdated":"' + new Date().toISOString() + '"}');
+    await ensureFileExists(PATHS.SCENE_DESCRIPTION_FILE, '{"descriptions":{"battle":[],"dialogue":[],"environment":[]},"lastUpdated":"' + new Date().toISOString() + '"}');
     
     console.error('All storage files are ready');
   } catch (error) {

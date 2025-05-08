@@ -8,6 +8,7 @@ import { promises as fs } from 'fs';
 import { outlineTools } from './outline-tools.js';
 import { outlineToolsV2 } from './outline-tools-v2.js';
 import { chapterSummaryManager, ChapterSummary } from './chapter-summary.js';
+import { sceneDescriptionManager, SceneType, SceneDescription } from './scene-description.js';
 import { PATHS, ensureStorageExists } from './storage-manager.js';
 
 console.error("MEMORY_FILE_PATH env:", process.env.MEMORY_FILE_PATH);
@@ -250,11 +251,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "object",
               properties: {
                 name: { type: "string", description: "实体的名称" },
-                entityType: { type: "string", description: "实体的类型，如'人物'、'物品'、'组织'、'世界观'、'力量体系'、'事件'等" },
+                entityType: { type: "string", description: "实体的类型，如'人物'、'物品'、'组织'、'世界观'、'力量体系'、'事件'等,注意区分类型，并且用英文而不是中文" },
                 observations: { 
                   type: "array", 
                   items: { type: "string" },
-                  description: "与实体相关的完整观察内容数组，应包含完整的信息，如类型为'人物'时，年龄: XX岁'、'性别: 男/女'、'身份: ...'、'记忆点: ...'、'定位: ...'、'人物冲突: ...'、'外貌特征: ...'、'背景故事: ...'、'性格特点: ...'、'能力: ...'、'弱点: ...'、'人际关系: ...'、'人物成长: ...'、'特殊设定: ...'等"
+                  description: "与实体相关的完整观察内容数组，应包含完整的信息，如类型为'人物'时，年龄: XX岁'、'性别: 男/女'、'身份: ...'、'记忆点: ...'、'定位: ...'、'人物冲突: ...'、'外貌特征: ...'、'背景故事: ...'、'性格特点: ...'、'能力: ...'、'弱点: ...'、'人际关系: ...'、'人物成长: ...'、'特殊设定: ...'、'其他设定:...'等"
                 },
               },
               required: ["name", "entityType", "observations"],
@@ -282,12 +283,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 properties: { 
                   type: "array", 
                   items: { type: "string" },
-                  description: "关系的详细属性数组，包含关系的各方面信息，比如人物中可能会存在'关系起始时间: ...'、'关系地点: ...'、'亲密度: ...'、'互相称呼: ...'等"
+                  description: "关系的详细属性数组，包含关系的各个方面信息，比如人物中可能会存在'关系起始时间: ...'、'关系地点: ...'、'亲密度: ...'、'互相称呼: ...'、关系描述:...'、关系演变:['【第x章】关系由陌生变为朋友','【第x章】关系由朋友变为敌人']等"
                 },
               },
               required: ["from", "to", "relationType", "properties"],
             },
-            description: "要创建的关系对象，每个关系都应有详尽的properties"
+            description: "要创建的关系对象，每个关系都应有尽可能详尽的properties，保证信息不丢失"
           },
         },
         required: ["relations"],
@@ -730,13 +731,145 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       }
     }
   ];
+  // 添加场景描述工具
+  const sceneDescriptionTools = [
+    {
+      name: "add_battle_scene",
+      description: "某个场景下某个技能的战斗描写示例。如果小说内容没有包含符合条件的战斗描写，则不输出",
+      inputSchema: {
+        type: "object",
+        properties: {
+          context: { 
+            type: "string", 
+            description: "战斗场景的上下文，格式为'战斗|技能名称|其他因素'，例如'战斗|掌心雷|雨天'" 
+          },
+          content: { 
+            type: "string", 
+            description: "该场景下的文本片段示例，应该是完整的战斗描写片段" 
+          },
+          chapterReference: { 
+            type: "string", 
+            description: "可选的章节引用，例如'第3章'" 
+          }
+        },
+        required: ["context", "content"],
+      },
+    },
+    {
+      name: "add_dialogue_scene",
+      description: "某两个人（不能超过两个人）的对话示例，应该包含至少两轮对话。如果小说内容没有包含符合条件的对话描写，则不输出",
+      inputSchema: {
+        type: "object",
+        properties: {
+          context: { 
+            type: "string", 
+            description: "对话场景的上下文，格式为'对话|角色1|角色2'，例如'对话|张三|李四'" 
+          },
+          content: { 
+            type: "string", 
+            description: "能够体现两人关系和性格的，两人对话的文本片段示例，以展示人物之间的具体互动细节" 
+          },
+          chapterReference: { 
+            type: "string", 
+            description: "可选的章节引用，例如'第5章'" 
+          }
+        },
+        required: ["context", "content"],
+      },
+    },
+    {
+      name: "add_environment_scene",
+      description: "某个地点的环境描写记录，仅环境描写，不包括事件。如果小说内容没有某个环境的描写，则不输出",
+      inputSchema: {
+        type: "object",
+        properties: {
+          context: { 
+            type: "string", 
+            description: "环境场景的上下文，格式为'环境|地点名称'，例如'环境|青丘山'" 
+          },
+          content: { 
+            type: "string", 
+            description: "某个地点的环境描写示例，应该是完整的环境描写片段" 
+          },
+          chapterReference: { 
+            type: "string", 
+            description: "可选的章节引用，例如'第7章'" 
+          }
+        },
+        required: ["context", "content"],
+      },
+    },
+    {
+      name: "get_scene_descriptions_by_type",
+      description: "获取特定类型的所有场景描述",
+      inputSchema: {
+        type: "object",
+        properties: {
+          type: { 
+            type: "string", 
+            enum: ["battle", "dialogue", "environment"],
+            description: "场景类型：battle（战斗）、dialogue（对话）或environment（环境）" 
+          }
+        },
+        required: ["type"],
+      },
+    },
+    {
+      name: "search_scene_descriptions",
+      description: "根据上下文搜索特定类型的场景描述",
+      inputSchema: {
+        type: "object",
+        properties: {
+          type: { 
+            type: "string", 
+            enum: ["battle", "dialogue", "environment"],
+            description: "场景类型：battle（战斗）、dialogue（对话）或environment（环境）" 
+          },
+          contextQuery: { 
+            type: "string", 
+            description: "要搜索的上下文关键词，例如'掌心雷'、'张三'或'青丘山'" 
+          }
+        },
+        required: ["type", "contextQuery"],
+      },
+    },
+    {
+      name: "delete_scene_description",
+      description: "删除特定类型和索引的场景描述",
+      inputSchema: {
+        type: "object",
+        properties: {
+          type: { 
+            type: "string", 
+            enum: ["battle", "dialogue", "environment"],
+            description: "场景类型：battle（战斗）、dialogue（对话）或environment（环境）" 
+          },
+          index: { 
+            type: "number", 
+            description: "要删除的场景描述的索引" 
+          }
+        },
+        required: ["type", "index"],
+      },
+    },
+    {
+      name: "get_all_scene_descriptions",
+      description: "获取所有类型的场景描述",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+  ];
+
 
   return {
     tools: [
       ...knowledgeGraphTools,
       ...legacyOutlineTools,     // 保留旧版本的工具函数
       ...outlineManagementTools, // 添加新的路径式工具函数
-      ...chapterSummaryTools     // 添加章节总结工具
+      ...chapterSummaryTools,     // 添加章节总结工具
+      ...sceneDescriptionTools 
     ],
   };
 });
@@ -946,6 +1079,86 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               success: true,
               data: chapterSummary
             }, null, 2)
+          }]
+        };
+      
+      // --- 场景描述工具 ---
+      case "add_battle_scene":
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(await sceneDescriptionManager.addSceneDescription({
+              type: SceneType.BATTLE,
+              context: args.context as string,
+              content: args.content as string,
+              chapterReference: args.chapterReference as string
+            }), null, 2)
+          }]
+        };
+        
+      case "add_dialogue_scene":
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(await sceneDescriptionManager.addSceneDescription({
+              type: SceneType.DIALOGUE,
+              context: args.context as string,
+              content: args.content as string,
+              chapterReference: args.chapterReference as string
+            }), null, 2)
+          }]
+        };
+        
+      case "add_environment_scene":
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(await sceneDescriptionManager.addSceneDescription({
+              type: SceneType.ENVIRONMENT,
+              context: args.context as string,
+              content: args.content as string,
+              chapterReference: args.chapterReference as string
+            }), null, 2)
+          }]
+        };
+        
+      case "get_scene_descriptions_by_type":
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(await sceneDescriptionManager.getSceneDescriptionsByType(
+              args.type as SceneType
+            ), null, 2)
+          }]
+        };
+        
+      case "search_scene_descriptions":
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(await sceneDescriptionManager.searchSceneDescriptions(
+              args.type as SceneType,
+              args.contextQuery as string
+            ), null, 2)
+          }]
+        };
+        
+      case "delete_scene_description":
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(await sceneDescriptionManager.deleteSceneDescription(
+              args.type as SceneType,
+              args.index as number
+            ), null, 2)
+          }]
+        };
+        
+      case "get_all_scene_descriptions":
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(await sceneDescriptionManager.getAllSceneDescriptions(), null, 2)
           }]
         };
       
