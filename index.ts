@@ -670,15 +670,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             type: "object",
             properties: {
               title: { type: "string", description: "章节标题，如'第10章 难得的喘息之机'" },
-              threeActStructure: {
-                type: "object",
-                properties: {
-                  beginning: { type: "string", description: "章节开始部分的简短概括 (起)" },
-                  middle: { type: "string", description: "章节中间部分的简短概括 (承)" },
-                  end: { type: "string", description: "章节结尾部分的简短概括 (转)" }
-                },
-                required: ["beginning", "middle", "end"]
-              },
               plotSummary: { type: "string", description: "章节整体剧情的详细概括" },
               keyLocations: { 
                 type: "array", 
@@ -702,7 +693,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               },
               endingSuspense: { type: "string", description: "章节结尾引发的悬念或为后续剧情埋下的伏笔" }
             },
-            required: ["title", "threeActStructure", "plotSummary", "keyLocations", "characterActions", "endingSuspense"]
+            required: ["title", "plotSummary", "keyLocations", "characterActions", "endingSuspense"]
           }
         },
         required: ["chapterId", "summary"]

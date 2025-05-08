@@ -5,11 +5,6 @@ import { PATHS } from './storage-manager.js';
 // 重新定义章节摘要的接口，使用英文字段名
 export interface ChapterSummary {
   title: string;           // 章节标题
-  threeActStructure: {     // 三幕结构
-    beginning: string;     // 起
-    middle: string;        // 承
-    end: string;          // 转
-  };
   plotSummary: string;     // 剧情概要
   keyLocations: string[];  // 关键地点
   worldBuilding: string[]; // 背景设定
