@@ -24,6 +24,7 @@ interface Entity {
   name: string;
   entityType: string;
   observations: string[];
+  aliases?: string[];
 }
 
 interface Relation {
@@ -46,7 +47,13 @@ class KnowledgeGraphManager {
       const lines = data.split("\n").filter(line => line.trim() !== "");
       return lines.reduce((graph: KnowledgeGraph, line) => {
         const item = JSON.parse(line);
-        if (item.type === "entity") graph.entities.push(item as Entity);
+        if (item.type === "entity") {
+          // 确保所有实体都有aliases字段
+          if (!item.aliases) {
+            item.aliases = [];
+          }
+          graph.entities.push(item as Entity);
+        }
         if (item.type === "relation") graph.relations.push(item as Relation);
         return graph;
       }, { entities: [], relations: [] });
@@ -69,6 +76,14 @@ class KnowledgeGraphManager {
   async createEntities(entities: Entity[]): Promise<Entity[]> {
     const graph = await this.loadGraph();
     const newEntities = entities.filter(e => !graph.entities.some(existingEntity => existingEntity.name === e.name));
+
+    // 确保每个实体的aliases字段存在
+    newEntities.forEach(entity => {
+      if (!entity.aliases) {
+        entity.aliases = [];
+      }
+    });
+    
     graph.entities.push(...newEntities);
     await this.saveGraph(graph);
     return newEntities;
@@ -147,6 +162,7 @@ class KnowledgeGraphManager {
     const filteredEntities = graph.entities.filter(e => 
       e.name.toLowerCase().includes(query.toLowerCase()) ||
       e.entityType.toLowerCase().includes(query.toLowerCase()) ||
+      (e.aliases && e.aliases.some(alias => alias.toLowerCase().includes(query.toLowerCase()))) || // 添加别名搜索
       e.observations.some(o => o.toLowerCase().includes(query.toLowerCase()))
     );
   
@@ -191,20 +207,30 @@ class KnowledgeGraphManager {
   async getEntityNetwork(entityName: string): Promise<KnowledgeGraph> {
     const graph = await this.loadGraph();
     
-    // 1. 查找指定的实体
-    const targetEntity = graph.entities.find(e => e.name === entityName);
+    // 1. 查找指定的实体（先通过名称查找，再通过别名查找）
+    let targetEntity = graph.entities.find(e => e.name === entityName);
+    
+    // 如果没找到，尝试通过别名查找
+    if (!targetEntity) {
+      targetEntity = graph.entities.find(e => 
+        e.aliases && e.aliases.includes(entityName)
+      );
+    }
+    
     if (!targetEntity) {
       return { entities: [], relations: [] };
     }
     
+    const actualEntityName = targetEntity.name; // 获取实体的真实名称
+    
     // 2. 找出所有与该实体相关的关系（包括from和to两个方向）
     const relatedRelations = graph.relations.filter(r => 
-      r.from === entityName || r.to === entityName
+      r.from === actualEntityName || r.to === actualEntityName
     );
     
     // 3. 收集所有与这些关系相关的其他实体名称
     const relatedEntityNames = new Set<string>();
-    relatedEntityNames.add(entityName); // 添加目标实体本身
+    relatedEntityNames.add(actualEntityName); // 添加目标实体本身
     
     relatedRelations.forEach(r => {
       relatedEntityNames.add(r.from);
@@ -221,6 +247,29 @@ class KnowledgeGraphManager {
       entities: relatedEntities,
       relations: relatedRelations
     };
+  }
+
+  async updateEntityAliases(updates: { entityName: string; aliases: string[]; append?: boolean }[]): Promise<{ entityName: string; updatedAliases: string[] }[]> {
+    const graph = await this.loadGraph();
+    const results = updates.map(update => {
+      const entity = graph.entities.find(e => e.name === update.entityName);
+      if (!entity) {
+        throw new Error(`Entity with name ${update.entityName} not found`);
+      }
+      
+      // 如果是追加模式，合并现有别名和新别名，并去重
+      if (update.append && entity.aliases) {
+        entity.aliases = Array.from(new Set([...entity.aliases, ...update.aliases]));
+      } else {
+        // 否则直接替换
+        entity.aliases = [...update.aliases];
+      }
+      
+      return { entityName: update.entityName, updatedAliases: entity.aliases };
+    });
+    
+    await this.saveGraph(graph);
+    return results;
   }
 }
 
@@ -241,7 +290,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   const knowledgeGraphTools = [
     {
       name: "create_entities",
-      description: "创建新实体到知识图谱中。每个实体的observations必须包含完整详细的信息，每项信息应单独成为数组中的一个元素，格式为'属性: 详细描述'",
+      description: "创建新实体到知识图谱中。每个实体可以包含别名，observations必须包含完整详细的信息，每项信息应单独成为数组中的一个元素，格式为'属性: 详细描述'",
       inputSchema: {
         type: "object",
         properties: {
@@ -250,8 +299,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             items: {
               type: "object",
               properties: {
-                name: { type: "string", description: "实体的名称" },
+                name: { type: "string", description: "实体的名称（主要名称）" },
                 entityType: { type: "string", description: "实体的类型，如'人物'、'物品'、'组织'、'世界观'、'力量体系'、'事件'等,注意区分类型，并且用英文而不是中文" },
+                aliases: { 
+                  type: "array", 
+                  items: { type: "string" },
+                  description: "实体的所有别名、昵称、称号等"
+                },
                 observations: { 
                   type: "array", 
                   items: { type: "string" },
@@ -268,7 +322,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     },
     {
       name: "create_relations",
-      description: "在知识图谱中创建多个新关系。关系应该使用主动语态，每个关系必须包含详细的properties信息，描述关系的各个方面，每项信息应单独成为数组中的一个元素，格式为'属性: 详细描述'",
+      description: "在知识图谱中创建多个新关系。关系应该使用主动语态，每个关系必须包含详细的properties信息，描述关系的各个方面，每项信息应单独成为数组中的一个元素，格式为'属性: 详细描述'。可以使用特殊的relationType='calls'来记录称呼关系，表示from实体称呼to实体为某个别名，在properties中记录称呼的上下文信息",
       inputSchema: {
         type: "object",
         properties: {
@@ -279,11 +333,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               properties: {
                 from: { type: "string", description: "关系起始实体的名称" },
                 to: { type: "string", description: "关系指向实体的名称" },
-                relationType: { type: "string", description: "关系的类型，如'雇佣'、'朋友'、'敌人'等" },
+                relationType: { type: "string", description: "关系的类型，如'雇佣'、'朋友'、'敌人'等。特殊类型'calls'用于记录称呼关系" },
                 properties: { 
                   type: "array", 
                   items: { type: "string" },
-                  description: "关系的详细属性数组，包含关系的各个方面信息，比如人物中可能会存在'关系起始时间: ...'、'关系地点: ...'、'亲密度: ...'、'互相称呼: ...'、关系描述:...'、关系演变:['【第x章】关系由陌生变为朋友','【第x章】关系由朋友变为敌人']等"
+                  description: "关系的详细属性数组，包含关系的各个方面信息，比如人物中可能会存在'关系起始时间: ...'、'关系地点: ...'、'亲密度: ...'、'互相称呼: ...'、关系描述:...'、关系演变:['【第x章】关系由陌生变为朋友','【第x章】关系由朋友变为敌人']等。对于'calls'关系类型，应包含'称呼内容: XX'、'称呼场合: XX'、'称呼情感: XX'等"
                 },
               },
               required: ["from", "to", "relationType", "properties"],
@@ -429,6 +483,35 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
         },
         required: ["entityName"],
+      },
+    },
+    {
+      name: "update_entity_aliases",
+      description: "更新实体的别名列表，可以完全替换或追加别名",
+      inputSchema: {
+        type: "object",
+        properties: {
+          updates: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                entityName: { type: "string", description: "要更新别名的实体名称" },
+                aliases: { 
+                  type: "array", 
+                  items: { type: "string" },
+                  description: "新的别名列表" 
+                },
+                append: { 
+                  type: "boolean", 
+                  description: "是否追加到现有别名(true)或完全替换(false)，默认为false" 
+                }
+              },
+              required: ["entityName", "aliases"],
+            },
+          },
+        },
+        required: ["updates"],
       },
     },
   ];
@@ -898,6 +981,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
       case "get_entity_network":
         return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.getEntityNetwork(args.entityName as string), null, 2) }] };
+      case "update_entity_aliases":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.updateEntityAliases(args.updates as { entityName: string; aliases: string[]; append?: boolean }[]), null, 2) }] };
       
       // // --- 旧的基于索引的大纲工具 ---
       // case "get_volume_info":
