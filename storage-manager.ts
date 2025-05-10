@@ -1,18 +1,18 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import process from 'process';
 
-// 获取模块的目录路径
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+// 使用当前工作目录作为基础路径，而不是模块路径
+const CWD = process.cwd();
 
-// 定义存储目录位置（默认为模块同级的memory-storage目录）
-const DEFAULT_STORAGE_DIR = path.join(MODULE_DIR, 'memory-storage');
+// 定义存储目录位置（默认为当前工作目录下的memory-storage目录）
+const DEFAULT_STORAGE_DIR = path.join(CWD, 'memory-storage');
 const STORAGE_DIR = process.env.MEMORY_STORAGE_DIR || DEFAULT_STORAGE_DIR;
 
 // 定义各个文件路径
 export const PATHS = {
   // 知识图谱文件
-  MEMORY_FILE: path.join(STORAGE_DIR, 'graph-memory.json'),
+  GRAPH_MEMORY_FILE: path.join(STORAGE_DIR, 'graph-memory.json'),
   
   // 大纲文件
   OUTLINE_JSON_FILE: path.join(STORAGE_DIR, 'outline.json'),
@@ -38,7 +38,7 @@ export async function ensureStorageExists(): Promise<void> {
     console.error(`Storage directory ensured at: ${STORAGE_DIR}`);
     
     // 检查并创建各个文件（如果不存在）
-    await ensureFileExists(PATHS.MEMORY_FILE, '');
+    await ensureFileExists(PATHS.GRAPH_MEMORY_FILE, '');
     await ensureFileExists(PATHS.OUTLINE_JSON_FILE, '{"volumes":{},"acts":{},"plotPoints":{},"chapters":{}}');
     await ensureFileExists(PATHS.CHAPTER_SUMMARY_FILE, '{"summaries":{},"lastUpdated":"' + new Date().toISOString() + '"}');
     await ensureFileExists(PATHS.SCENE_DESCRIPTION_FILE, '{"descriptions":{"battle":[],"dialogue":[],"environment":[]},"lastUpdated":"' + new Date().toISOString() + '"}');

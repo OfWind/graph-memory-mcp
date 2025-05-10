@@ -10,13 +10,13 @@ import { chapterSummaryManager, ChapterSummary } from './chapter-summary.js';
 import { sceneDescriptionManager, SceneType, SceneDescription } from './scene-description.js';
 import { PATHS, ensureStorageExists } from './storage-manager.js';
 
-console.error("MEMORY_FILE_PATH env:", process.env.MEMORY_FILE_PATH);
+// console.error("MEMORY_FILE_PATH env:", process.env.MEMORY_FILE_PATH);
 
-// Define memory file path using environment variable with fallback
-const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH || PATHS.MEMORY_FILE;
+// // Define memory file path using environment variable with fallback
+// const MEMORY_FILE_PATH = process.env.MEMORY_FILE_PATH || PATHS.MEMORY_FILE;
 
-// Log the final path being used
-console.error("Using memory file path:", MEMORY_FILE_PATH);
+// // Log the final path being used
+// console.error("Using memory file path:", MEMORY_FILE_PATH);
 
 // We are storing our memory using entities, relations, and observations in a graph structure
 interface Entity {
@@ -42,7 +42,7 @@ interface KnowledgeGraph {
 class KnowledgeGraphManager {
   private async loadGraph(): Promise<KnowledgeGraph> {
     try {
-      const data = await fs.readFile(MEMORY_FILE_PATH, "utf-8");
+      const data = await fs.readFile(PATHS.GRAPH_MEMORY_FILE, "utf-8");
       const lines = data.split("\n").filter(line => line.trim() !== "");
       return lines.reduce((graph: KnowledgeGraph, line) => {
         const item = JSON.parse(line);
@@ -69,7 +69,7 @@ class KnowledgeGraphManager {
       ...graph.entities.map(e => JSON.stringify({ type: "entity", ...e })),
       ...graph.relations.map(r => JSON.stringify({ type: "relation", ...r })),
     ];
-    await fs.writeFile(MEMORY_FILE_PATH, lines.join("\n"));
+    await fs.writeFile(PATHS.GRAPH_MEMORY_FILE, lines.join("\n"));
   }
 
   async createEntities(entities: Entity[]): Promise<Entity[]> {

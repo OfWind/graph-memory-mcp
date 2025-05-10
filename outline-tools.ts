@@ -525,7 +525,7 @@ class OutlineManager  {
     
     try {
       // 读取YAML文件
-      const yamlFilePath = process.env.OUTLINE_FILE_PATH || PATHS.OUTLINE_YAML_FILE;
+      const yamlFilePath = process.env.OUTLINE_FILE_PATH || PATHS.OUTLINE_JSON_FILE;
       await log(`Reading YAML from: ${yamlFilePath}`);
       
       const fileContent = await fs.readFile(yamlFilePath, 'utf8');
