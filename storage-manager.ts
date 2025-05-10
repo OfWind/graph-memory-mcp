@@ -12,11 +12,10 @@ const STORAGE_DIR = process.env.MEMORY_STORAGE_DIR || DEFAULT_STORAGE_DIR;
 // 定义各个文件路径
 export const PATHS = {
   // 知识图谱文件
-  MEMORY_FILE: path.join(STORAGE_DIR, 'memory.json'),
+  MEMORY_FILE: path.join(STORAGE_DIR, 'graph-memory.json'),
   
   // 大纲文件
-  OUTLINE_JSON_FILE: path.join(STORAGE_DIR, 'outline-v2.json'),
-  OUTLINE_YAML_FILE: path.join(STORAGE_DIR, 'outline.yaml'),
+  OUTLINE_JSON_FILE: path.join(STORAGE_DIR, 'outline.json'),
   
   // 章节总结文件
   CHAPTER_SUMMARY_FILE: path.join(STORAGE_DIR, 'chapter-summaries.json'),
@@ -25,7 +24,7 @@ export const PATHS = {
   SCENE_DESCRIPTION_FILE: path.join(STORAGE_DIR, 'scene-descriptions.json'),
   
   // 日志文件
-  OUTLINE_LOG_FILE: path.join(STORAGE_DIR, 'mcp-outline-tools-v2.log')
+  OUTLINE_LOG_FILE: path.join(STORAGE_DIR, 'mcp-graph-tools.log')
 };
 
 /**

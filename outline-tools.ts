@@ -1,462 +1,694 @@
 import { promises as fs } from 'fs';
 import * as yaml from 'js-yaml';
 import path from 'path';
+import { PATHS } from './storage-manager.js';
 
-// 添加日志帮助函数
-function log(message: string, data?: any) {
-  const logMessage = data 
-    ? `[OUTLINE-TOOLS] ${message}: ${JSON.stringify(data, null, 2)}`
-    : `[OUTLINE-TOOLS] ${message}`;
-    
-  // 同时输出到控制台
+// --- 配置与常量 ---
+const OUTLINE_JSON_PATH = process.env.OUTLINE_JSON_PATH || PATHS.OUTLINE_JSON_FILE;
+const LOG_FILE_PATH = PATHS.OUTLINE_LOG_FILE;
+
+// --- 日志功能 ---
+async function log(message: string, data?: any) {
+  const timestamp = new Date().toISOString();
+  const logMessage = data
+    ? `${timestamp} [OUTLINE-TOOLS-V2] ${message}: ${JSON.stringify(data, null, 2)}`
+    : `${timestamp} [OUTLINE-TOOLS-V2] ${message}`;
+
   console.log(logMessage);
-  
-  // 写入文件
-  fs.appendFile('mcp-outline-tools.log', logMessage + '\n')
-    .catch(err => console.error('Error writing to log file:', err));
+
+  try {
+    await fs.appendFile(LOG_FILE_PATH, logMessage + '\n');
+  } catch (err) {
+    console.error('Error writing to log file:', err);
+  }
 }
 
-// 在模块开始时记录初始化
-log('模块初始化开始');
+// --- 接口定义 ---
+// 基础节点结构
+interface BaseNode {
+  title: string;    // 标题
+  metadata?: Record<string, any>; // 存储原YAML中的其他字段
+}
 
-// 定义环境变量或使用默认值
-const OUTLINE_FILE_PATH = process.env.OUTLINE_FILE_PATH || 'outline.yaml';
-log(`使用大纲文件路径: ${OUTLINE_FILE_PATH}`);
+interface VolumeNode extends BaseNode {
+  type: 'volume';
+  // 以下字段会存储在metadata中
+  // 章节数目?: number;
+  // 核心矛盾?: string;
+  // 主要反派?: string;
+  // 剧情结局?: string[];
+}
 
-// 大纲结构接口定义
-interface Chapter {
+interface ActNode extends BaseNode {
+  type: 'act';
+  // 以下字段会存储在metadata中
+  // 章节数目?: number;
+  // 简介?: string;
+}
+
+interface PlotPointNode extends BaseNode {
+  type: 'plot_point';
+  // 以下字段会存储在metadata中
+  // 章节数目?: string;
+  // 具体章节?: string;
+  // 剧情?: string;
+  // 爽点设置?: string;
+}
+
+interface ChapterNode extends BaseNode {
+  type: 'chapter';
+  index: number; // 全局章节索引
+  // 以下字段会存储在metadata中
+  // 剧情说明?: string;
+  // 情绪点?: string;
+  // 章末悬念?: string;
+  // 剧情点?: string[];
+}
+
+type OutlineNode = VolumeNode | ActNode | PlotPointNode | ChapterNode;
+
+// 方案 的主要数据结构
+interface OutlineData  {
+  volumes: Record<string, VolumeNode>;        // 键: 路径 (e.g., "/v1")
+  acts: Record<string, ActNode>;              // 键: 路径 (e.g., "/v1/a1")
+  plotPoints: Record<string, PlotPointNode>;  // 键: 路径 (e.g., "/v1/a1/p1")
+  chapters: Record<string, ChapterNode>;      // 键: 路径 (e.g., "/v1/a1/p1/c1")
+}
+
+// 原YAML结构接口
+interface YamlChapter {
   chapter_name: string;
   chapter_index: number;
   剧情说明?: string;
   情绪点?: string;
   章末悬念?: string;
   剧情点?: string[];
-  [key: string]: any; // 允许其他字段
+  [key: string]: any;
 }
 
-interface PlotPoint {
+interface YamlPlotPoint {
   plot_point_name: string;
   章节数目?: string;
   具体章节?: string;
   剧情?: string;
   爽点设置?: string;
-  chapters?: Chapter[];
-  [key: string]: any; 
+  chapters?: YamlChapter[];
+  [key: string]: any;
 }
 
-interface Act {
+interface YamlAct {
   act_name: string;
   章节数目?: number;
   简介?: string;
-  plot_points?: PlotPoint[];
-  [key: string]: any; 
+  plot_points?: YamlPlotPoint[];
+  [key: string]: any;
 }
 
-interface Volume {
+interface YamlVolume {
   volume: string;
   章节数目?: number;
   核心矛盾?: string;
   主要反派?: string;
   剧情结局?: string[];
-  acts?: Act[];
-  [key: string]: any; 
+  acts?: YamlAct[];
+  [key: string]: any;
 }
 
-interface Outline {
-  outline: Volume[];
+interface YamlOutline {
+  outline: YamlVolume[];
 }
 
-async function readOutlineFile(): Promise<Outline> {
-  log('开始读取大纲文件');
-  try {
-    log(`尝试读取文件: ${OUTLINE_FILE_PATH}`);
-    const fileContent = await fs.readFile(OUTLINE_FILE_PATH, 'utf8');
-    log('读取成功，正在解析YAML');
-    const result = yaml.load(fileContent) as Outline;
-    log('解析完成', { volumeCount: result.outline?.length });
-    return result;
-  } catch (error) {
-    console.error(`Error reading outline file: ${error}`);
+// --- 大纲管理类 ---
+class OutlineManager  {
+  private data: OutlineData  = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
+  private dataLoaded = false;
+
+  constructor(private filePath: string) {
+    log(`OutlineManager  initialized with file path: ${this.filePath}`);
+  }
+
+  // --- 数据加载和保存 ---
+  
+  async loadData(): Promise<void> {
+    if (this.dataLoaded) return;
     
-    // 如果文件不存在，创建一个空的outline文件
-    if (error instanceof Error && 'code' in error && (error as any).code === "ENOENT") {
-      log('文件不存在，创建空大纲');
-      const emptyOutline: Outline = { outline: [] };
+    await log('Attempting to load outline data from JSON file.');
+    try {
+      await log(`Reading file: ${this.filePath}`);
+      const fileContent = await fs.readFile(this.filePath, 'utf8');
+      this.data = JSON.parse(fileContent) as OutlineData ;
       
-      try {
-        // 确保目录存在
-        const directory = path.dirname(OUTLINE_FILE_PATH);
-        log(`创建目录: ${directory}`);
-        await fs.mkdir(directory, { recursive: true });
-        
-        // 创建空文件
-        const yamlContent = yaml.dump(emptyOutline);
-        log(`写入空大纲到: ${OUTLINE_FILE_PATH}`);
-        await fs.writeFile(OUTLINE_FILE_PATH, yamlContent, 'utf8');
-        console.error(`Created empty outline file at: ${OUTLINE_FILE_PATH}`);
-      } catch (writeError) {
-        log(`创建文件失败: ${writeError}`);
-        console.error(`Failed to create outline file: ${writeError}`);
+      // 确保所有字典都存在，即使文件只部分形成
+      this.data.volumes = this.data.volumes || {};
+      this.data.acts = this.data.acts || {};
+      this.data.plotPoints = this.data.plotPoints || {};
+      this.data.chapters = this.data.chapters || {};
+      
+      this.dataLoaded = true;
+      await log('Outline data loaded successfully.');
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && (error as any).code === "ENOENT") {
+        await log('Outline file not found. Initializing with empty structure.');
+        this.data = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
+        this.dataLoaded = true;
+        await this.saveData(); // 创建空文件
+      } else {
+        await log('Error loading outline data:', error);
+        this.data = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
+        this.dataLoaded = true;
+        console.error("Failed to load or initialize outline data. Using empty structure.", error);
       }
-      
-      return emptyOutline;
+    }
+  }
+
+  async saveData(): Promise<void> {
+    await log('Attempting to save outline data to JSON file.');
+    try {
+      const directory = path.dirname(this.filePath);
+      await fs.mkdir(directory, { recursive: true });
+      const jsonContent = JSON.stringify(this.data, null, 2);
+      await fs.writeFile(this.filePath, jsonContent, 'utf8');
+      await log('Outline data saved successfully.');
+    } catch (error) {
+      await log('Error saving outline data:', error);
+      console.error(`Error writing outline file: ${error}`);
+      throw error;
+    }
+  }
+
+  // --- 路径和类型工具方法 ---
+  
+  private getNodeTypeFromPath(nodePath: string): OutlineNode['type'] | null {
+    const parts = nodePath.split('/').filter(p => p);
+    if (parts.length === 1 && parts[0].startsWith('v')) return 'volume';
+    if (parts.length === 2 && parts[1].startsWith('a')) return 'act';
+    if (parts.length === 3 && parts[2].startsWith('p')) return 'plot_point';
+    if (parts.length === 4 && parts[3].startsWith('c')) return 'chapter';
+    return null;
+  }
+
+  private getDictionaryByType(type: OutlineNode['type']): Record<string, OutlineNode> {
+    switch (type) {
+      case 'volume': return this.data.volumes as Record<string, OutlineNode>;
+      case 'act': return this.data.acts as Record<string, OutlineNode>;
+      case 'plot_point': return this.data.plotPoints as Record<string, OutlineNode>;
+      case 'chapter': return this.data.chapters as Record<string, OutlineNode>;
+      default: throw new Error(`Invalid node type: ${type}`);
+    }
+  }
+
+  private getParentPath(nodePath: string): string {
+    const parts = nodePath.split('/');
+    if (parts.length <= 2) return '/';
+    return parts.slice(0, -1).join('/');
+  }
+
+  private async generateNextChildId(parentPath: string, childPrefix: 'v' | 'a' | 'p' | 'c'): Promise<number> {
+    await this.loadData();
+    const children = await this.getChildren(parentPath);
+    let maxId = 0;
+    
+    children.forEach(child => {
+      const childPath = child.path;
+      const childIdPart = childPath.split('/').pop();
+      if (childIdPart?.startsWith(childPrefix)) {
+        const num = parseInt(childIdPart.substring(1), 10);
+        if (!isNaN(num) && num > maxId) {
+          maxId = num;
+        }
+      }
+    });
+    
+    return maxId + 1;
+  }
+
+  // --- 核心路径操作方法 ---
+  
+  async getNode(nodePath: string): Promise<(OutlineNode & { path: string }) | null> {
+    await this.loadData();
+    const type = this.getNodeTypeFromPath(nodePath);
+    
+    if (!type) {
+      await log('getNode failed: Invalid path format', { path: nodePath });
+      return null;
     }
     
-    // 其他错误
-    log(`读取文件时遇到未知错误: ${error}`);
-    throw error;
+    const dictionary = this.getDictionaryByType(type);
+    const node = dictionary[nodePath];
+    
+    if (!node) {
+      await log('getNode failed: Node not found', { path: nodePath, type });
+      return null;
+    }
+    
+    await log('getNode success', { path: nodePath });
+    return { ...node, path: nodePath };
   }
-}
 
-// 辅助函数：写入大纲文件
-async function writeOutlineFile(outline: Outline): Promise<void> {
-  try {
-    const yamlContent = yaml.dump(outline, { 
-      indent: 2, 
-      lineWidth: -1, // 不限制行宽
-      noRefs: true  // 避免引用标记
+  async getChildren(parentPath: string): Promise<(OutlineNode & { path: string })[]> {
+    await this.loadData();
+    const children: (OutlineNode & { path: string })[] = [];
+    const parentDepth = parentPath === '/' ? 0 : parentPath.split('/').filter(p => p).length;
+
+    for (const dict of [this.data.volumes, this.data.acts, this.data.plotPoints, this.data.chapters]) {
+      for (const nodePath in dict) {
+        if (nodePath.startsWith(parentPath === '/' ? '/' : parentPath + '/') && nodePath !== parentPath) {
+          const nodeDepth = nodePath.split('/').filter(p => p).length;
+          if (nodeDepth === parentDepth + 1) {
+            children.push({ ...(dict[nodePath] as OutlineNode), path: nodePath });
+          }
+        }
+      }
+    }
+    
+    await log('getChildren success', { parentPath, count: children.length });
+    return children;
+  }
+
+  async addNode(
+    parentPath: string, 
+    nodeData: Partial<OutlineNode> & { 
+      type: OutlineNode['type'], 
+      title: string, 
+      index?: number, 
+      metadata?: Record<string, any> 
+    }
+  ): Promise<string | null> {
+    await this.loadData();
+    const { type, title, index, metadata, ...restData } = nodeData;
+
+    // 验证父路径存在（除非在根目录添加卷）
+    if (parentPath !== '/' && !(await this.getNode(parentPath))) {
+      await log('addNode failed: Parent path does not exist', { parentPath });
+      return null;
+    }
+
+    // 确定子前缀和预期的父类型
+    let childPrefix: 'v' | 'a' | 'p' | 'c';
+    let expectedParentType: OutlineNode['type'] | 'root';
+    
+    switch (type) {
+      case 'volume': 
+        childPrefix = 'v'; 
+        expectedParentType = 'root'; 
+        break;
+      case 'act': 
+        childPrefix = 'a'; 
+        expectedParentType = 'volume'; 
+        break;
+      case 'plot_point': 
+        childPrefix = 'p'; 
+        expectedParentType = 'act'; 
+        break;
+      case 'chapter': 
+        childPrefix = 'c'; 
+        expectedParentType = 'plot_point'; 
+        break;
+      default:
+        await log('addNode failed: Invalid node type specified', { type });
+        return null;
+    }
+
+    // 验证父节点类型
+    const parentType = parentPath === '/' ? 'root' : this.getNodeTypeFromPath(parentPath);
+    if (parentType !== expectedParentType) {
+      await log('addNode failed: Cannot add node type to this parent type', { 
+        nodeType: type, 
+        parentPath, 
+        parentType, 
+        expectedParentType 
+      });
+      return null;
+    }
+
+    // 生成新路径 - 章节类型特殊处理
+    let newNodePath: string;
+    
+    if (type === 'chapter') {
+      // 章节类型使用全局章节索引
+      if (index === undefined) {
+        await log('addNode failed: Chapter index is required', { nodeData });
+        return null;
+      }
+      
+      // 使用全局章节索引构建路径
+      newNodePath = `${parentPath}/c${index}`;
+      
+      // 检查是否已存在此路径（可能在不同情节点下有相同索引的章节）
+      const existingNode = this.data.chapters[newNodePath];
+      if (existingNode) {
+        await log('addNode failed: Chapter path already exists', { 
+          newNodePath, 
+          existingChapter: existingNode.title,
+          requestedChapter: title
+        });
+        return null;
+      }
+    } else {
+      // 非章节类型仍使用自增ID
+      const nextId = await this.generateNextChildId(parentPath, childPrefix);
+      newNodePath = parentPath === '/' ? `/${childPrefix}${nextId}` : `${parentPath}/${childPrefix}${nextId}`;
+    }
+
+    // 构建完整的节点对象
+    const newNode: OutlineNode = {
+      type,
+      title,
+      metadata: { ...metadata, ...restData },
+    } as OutlineNode;
+
+    // 添加特定类型所需的字段
+    if (newNode.type === 'chapter') {
+      (newNode as ChapterNode).index = index!;
+    }
+
+    // 添加到正确的字典中
+    const dictionary = this.getDictionaryByType(type);
+    dictionary[newNodePath] = newNode;
+    await log('addNode success', { newNodePath, type });
+    await this.saveData(); // 成功添加后保存
+    
+    return newNodePath;
+  }
+
+  async updateNode(nodePath: string, newData: Partial<OutlineNode>): Promise<boolean> {
+    await this.loadData();
+    const type = this.getNodeTypeFromPath(nodePath);
+    
+    if (!type) {
+      await log('updateNode failed: Invalid path format', { path: nodePath });
+      return false;
+    }
+    
+    const dictionary = this.getDictionaryByType(type);
+    const existingNode = dictionary[nodePath];
+
+    if (!existingNode) {
+      await log('updateNode failed: Node not found', { path: nodePath });
+      return false;
+    }
+
+    // 合并新数据 - 修复解构赋值
+    const { type: newType, title: newTitle, metadata: newMetadata, ...restNewData } = newData;
+    
+    // 提取特定类型的数据
+    let newIndex: number | undefined;
+    if ('index' in newData) {
+      newIndex = (newData as any).index;
+    }
+
+    // 不允许更改节点类型
+    if (newTitle !== undefined) existingNode.title = newTitle;
+    if (existingNode.type === 'chapter' && newIndex !== undefined) {
+      (existingNode as ChapterNode).index = newIndex;
+    }
+
+    // 合并metadata
+    existingNode.metadata = {
+      ...(existingNode.metadata || {}),
+      ...(newMetadata || {}),
+      ...restNewData // 将其他字段合并到metadata
+    };
+
+    await log('updateNode success', { path: nodePath });
+    await this.saveData();
+    return true;
+  }
+
+  async deleteNode(nodePath: string): Promise<boolean> {
+    await this.loadData();
+    const type = this.getNodeTypeFromPath(nodePath);
+    
+    if (!type) {
+      await log('deleteNode failed: Invalid path format', { path: nodePath });
+      return false;
+    }
+    
+    const dictionary = this.getDictionaryByType(type);
+
+    if (!dictionary[nodePath]) {
+      await log('deleteNode failed: Node not found', { path: nodePath });
+      return false;
+    }
+
+    // 删除节点本身
+    delete dictionary[nodePath];
+    let deletedCount = 1;
+    await log('deleteNode: Deleted target node', { path: nodePath });
+
+    // 递归删除子节点
+    const prefixToDelete = nodePath + '/';
+    for (const dict of [this.data.volumes, this.data.acts, this.data.plotPoints, this.data.chapters]) {
+      for (const path in dict) {
+        if (path.startsWith(prefixToDelete)) {
+          delete dict[path];
+          deletedCount++;
+          await log('deleteNode: Deleted child node', { path });
+        }
+      }
+    }
+
+    await log('deleteNode success', { path: nodePath, totalDeleted: deletedCount });
+    await this.saveData();
+    return true;
+  }
+
+  // --- 特定辅助方法（适配旧工具）---
+
+  async getAllChaptersSorted(): Promise<(ChapterNode & { path: string })[]> {
+    await this.loadData();
+    const chapters = Object.entries(this.data.chapters).map(([path, node]) => ({ ...node, path }));
+    chapters.sort((a, b) => a.index - b.index);
+    return chapters;
+  }
+
+  async getChapterWindowByPath(centerChapterPath: string, windowSize: number = 2): Promise<(ChapterNode & { path: string })[]> {
+    await log(`Getting chapter window by path - Center: ${centerChapterPath}, Size: ${windowSize}`);
+    const type = this.getNodeTypeFromPath(centerChapterPath);
+    
+    if (type !== 'chapter') {
+      await log('getChapterWindowByPath failed: Path is not a chapter path', { centerChapterPath });
+      return [];
+    }
+
+    const allChaptersSorted = await this.getAllChaptersSorted();
+    const centerIndexInArray = allChaptersSorted.findIndex(ch => ch.path === centerChapterPath);
+
+    if (centerIndexInArray === -1) {
+      await log('getChapterWindowByPath failed: Center chapter path not found in sorted list', { centerChapterPath });
+      return [];
+    }
+
+    const startIndex = Math.max(0, centerIndexInArray - windowSize);
+    const endIndex = Math.min(allChaptersSorted.length - 1, centerIndexInArray + windowSize);
+    const result = allChaptersSorted.slice(startIndex, endIndex + 1);
+
+    await log('getChapterWindowByPath success', { 
+      centerChapterPath, 
+      windowSize, 
+      count: result.length, 
+      indices: result.map(ch => ch.index) 
     });
-    await fs.writeFile(OUTLINE_FILE_PATH, yamlContent, 'utf8');
-  } catch (error) {
-    console.error(`Error writing outline file: ${error}`);
-    throw error;
+    
+    return result;
   }
-}
 
-// 工具1: 获取卷的基本信息
-export async function getVolumeInfo(volumeIndex: number): Promise<Volume | null> {
-  const outline = await readOutlineFile();
-  
-  if (volumeIndex < 0 || volumeIndex >= outline.outline.length) {
+  async getVolumeInfoByPath(volumePath: string): Promise<(VolumeNode & { path: string }) | null> {
+    await log(`Getting volume info by path: ${volumePath}`);
+    const node = await this.getNode(volumePath);
+    
+    if (node && node.type === 'volume') {
+      return node as (VolumeNode & { path: string });
+    }
+    
+    await log('getVolumeInfoByPath failed: Node not found or not a volume', { volumePath });
+    return null;
+  }
+
+  async getChapterOutlineByPath(chapterPath: string): Promise<(ChapterNode & { path: string }) | null> {
+    await log(`Getting chapter outline by path: ${chapterPath}`);
+    const node = await this.getNode(chapterPath);
+    
+    if (node && node.type === 'chapter') {
+      return node as (ChapterNode & { path: string });
+    }
+    
+    await log('getChapterOutlineByPath failed: Node not found or not a chapter', { chapterPath });
     return null;
   }
   
-  // 返回卷的基本信息，移除详细章节内容以减小体积
-  const volume = { ...outline.outline[volumeIndex] };
-  if (volume.acts) {
-    volume.acts = volume.acts.map(act => {
-      const { plot_points, ...actWithoutPlotPoints } = act;
-      return actWithoutPlotPoints;
-    });
-  }
+  // --- 导入/迁移功能 ---
   
-  return volume;
-}
-
-// 工具2: 获取指定章节及其前后N章的信息
-export async function getChapterOutlineWindow(centerChapterIndex: number, windowSize: number = 2): Promise<Chapter[]> {
-  log(`获取章节窗口 - 中心章节: ${centerChapterIndex}, 窗口大小: ${windowSize}`);
-  const outline = await readOutlineFile();
-  const allChapters: Chapter[] = [];
-  
-  // 收集所有章节
-  outline.outline.forEach(volume => {
-    volume.acts?.forEach(act => {
-      act.plot_points?.forEach(plotPoint => {
-        if (plotPoint.chapters) {
-          allChapters.push(...plotPoint.chapters);
-          log(`从情节点 "${plotPoint.plot_point_name}" 添加 ${plotPoint.chapters.length} 章`);
-        }
-      });
-    });
-  });
-  
-  // 根据chapter_index排序
-  allChapters.sort((a, b) => a.chapter_index - b.chapter_index);
-  log(`总共收集了 ${allChapters.length} 章, 排序后的章节索引: ${allChapters.map(ch => ch.chapter_index).join(', ')}`);
-  
-  // 查找中心章节的位置
-  const centerIndex = allChapters.findIndex(ch => ch.chapter_index === centerChapterIndex);
-  log(`中心章节在数组中的位置: ${centerIndex}`);
-  if (centerIndex === -1) {
-    log(`未找到中心章节 ${centerChapterIndex}`);
-    return [];
-  }
-  
-  // 计算窗口范围
-  const startIndex = Math.max(0, centerIndex - windowSize);
-  const endIndex = Math.min(allChapters.length - 1, centerIndex + windowSize);
-  log(`窗口范围 - 开始索引: ${startIndex}, 结束索引: ${endIndex}`);
-  
-  // 返回窗口内的章节
-  const result = allChapters.slice(startIndex, endIndex + 1);
-  log(`返回章节窗口, 包含 ${result.length} 章`, result.map(ch => ({ 
-    index: ch.chapter_index, 
-    name: ch.chapter_name 
-  })));
-  return result;
-}
-
-// 工具3: 获取特定索引的章节信息
-export async function getChapterOutlineByIndex(chapterIndex: number): Promise<Chapter | null> {
-  const outline = await readOutlineFile();
-  
-  for (const volume of outline.outline) {
-    for (const act of volume.acts || []) {
-      for (const plotPoint of act.plot_points || []) {
-        const chapter = (plotPoint.chapters || []).find(ch => ch.chapter_index === chapterIndex);
-        if (chapter) {
-          return chapter;
-        }
-      }
-    }
-  }
-  
-  return null;
-}
-
-// 工具4: 更新大纲的特定部分
-export async function updateOutline(
-  volumeIndex: number,
-  newData: any,
-  actIndex?: number,
-  plotPointIndex?: number,
-  chapterIndex?: number
-): Promise<boolean> {
-  const outline = await readOutlineFile();
-  
-  if (volumeIndex < 0 || volumeIndex >= outline.outline.length) {
-    return false;
-  }
-  
-  // 更新卷信息
-  if (actIndex === undefined) {
-    outline.outline[volumeIndex] = { ...outline.outline[volumeIndex], ...newData };
-    await writeOutlineFile(outline);
-    return true;
-  }
-  
-  const acts = outline.outline[volumeIndex].acts || [];
-  if (actIndex < 0 || actIndex >= acts.length) {
-    return false;
-  }
-  
-  // 更新幕信息
-  if (plotPointIndex === undefined) {
-    acts[actIndex] = { ...acts[actIndex], ...newData };
-    await writeOutlineFile(outline);
-    return true;
-  }
-  
-  const plotPoints = acts[actIndex].plot_points || [];
-  if (plotPointIndex < 0 || plotPointIndex >= plotPoints.length) {
-    return false;
-  }
-  
-  // 更新情节点信息
-  if (chapterIndex === undefined) {
-    plotPoints[plotPointIndex] = { ...plotPoints[plotPointIndex], ...newData };
-    await writeOutlineFile(outline);
-    return true;
-  }
-  
-  const chapters = plotPoints[plotPointIndex].chapters || [];
-  const chapterIdx = chapters.findIndex(ch => ch.chapter_index === chapterIndex);
-  if (chapterIdx === -1) {
-    return false;
-  }
-  
-  // 更新章节信息
-  chapters[chapterIdx] = { ...chapters[chapterIdx], ...newData };
-  await writeOutlineFile(outline);
-  return true;
-}
-
-/**
- * 增强版添加大纲函数 - 支持一次性创建完整层次结构或添加特定部分
- * @param newData 要添加的数据
- * @param volumeIndex 卷的索引
- * @param actIndex 幕的索引
- * @param plotPointIndex 情节点的索引
- * @returns 是否添加成功
- */
-export async function addOutline(
-  newData: any,
-  volumeIndex?: number,
-  actIndex?: number,
-  plotPointIndex?: number
-): Promise<boolean> {
-  try {
-    // 读取现有大纲
-    let outline: any = { outline: [] };
+  // 处理YAML转换中的文件路径
+  async convertYAMLToJSON(): Promise<boolean> {
+    await log('Starting YAML to JSON conversion');
+    
     try {
-      const fileContent = await fs.readFile(OUTLINE_FILE_PATH, 'utf-8');
-      outline = yaml.load(fileContent) as any;
-      if (!outline || !outline.outline) {
-        outline = { outline: [] };
-      }
-    } catch (error) {
-      console.log('No existing outline file, creating new one');
-    }
-
-    // 深度合并函数（使用类型安全的方式）
-    function deepMerge(target: any, source: any): any {
-      // 如果源是数组
-      if (Array.isArray(source)) {
-        if (!Array.isArray(target)) {
-          target = [];
-        }
+      // 读取YAML文件
+      const yamlFilePath = process.env.OUTLINE_FILE_PATH || PATHS.OUTLINE_YAML_FILE;
+      await log(`Reading YAML from: ${yamlFilePath}`);
+      
+      const fileContent = await fs.readFile(yamlFilePath, 'utf8');
+      const yamlData = yaml.load(fileContent) as YamlOutline;
+      
+      // 重置现有数据
+      this.data = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
+      
+      // 处理卷
+      for (let volIdx = 0; volIdx < yamlData.outline.length; volIdx++) {
+        const yamlVolume = yamlData.outline[volIdx];
+        const volumePath = `/v${volIdx + 1}`;
         
-        // 对于章节数组，我们需要特殊处理以避免覆盖
-        if (source.length > 0 && source[0] && (source[0].chapter_name || source[0].chapter_index)) {
-          // 这是章节数组，使用章节索引作为唯一标识符
-          const targetMap = new Map();
-          target.forEach((item: any) => {
-            if (item.chapter_index) {
-              targetMap.set(item.chapter_index, item);
-            }
-          });
-          
-          source.forEach((sourceChapter: any) => {
-            if (sourceChapter.chapter_index) {
-              if (targetMap.has(sourceChapter.chapter_index)) {
-                // 更新现有章节
-                const existingChapter = targetMap.get(sourceChapter.chapter_index);
-                Object.assign(existingChapter, sourceChapter);
-              } else {
-                // 添加新章节
-                target.push({...sourceChapter});
+        // 提取卷的元数据
+        const { volume, acts, ...volumeMetadata } = yamlVolume;
+        
+        // 创建卷节点
+        this.data.volumes[volumePath] = {
+          type: 'volume',
+          title: volume,
+          metadata: volumeMetadata
+        };
+        
+        await log(`Converted volume: ${volume} -> ${volumePath}`);
+        
+        // 处理幕
+        if (acts) {
+          for (let actIdx = 0; actIdx < acts.length; actIdx++) {
+            const yamlAct = acts[actIdx];
+            const actPath = `${volumePath}/a${actIdx + 1}`;
+            
+            // 提取幕的元数据
+            const { act_name, plot_points, ...actMetadata } = yamlAct;
+            
+            // 创建幕节点
+            this.data.acts[actPath] = {
+              type: 'act',
+              title: act_name,
+              metadata: actMetadata
+            };
+            
+            await log(`Converted act: ${act_name} -> ${actPath}`);
+            
+            // 处理情节点
+            if (plot_points) {
+              for (let ppIdx = 0; ppIdx < plot_points.length; ppIdx++) {
+                const yamlPlotPoint = plot_points[ppIdx];
+                const plotPointPath = `${actPath}/p${ppIdx + 1}`;
+                
+                // 提取情节点的元数据
+                const { plot_point_name, chapters, ...plotPointMetadata } = yamlPlotPoint;
+                
+                // 创建情节点节点
+                this.data.plotPoints[plotPointPath] = {
+                  type: 'plot_point',
+                  title: plot_point_name,
+                  metadata: plotPointMetadata
+                };
+                
+                await log(`Converted plot point: ${plot_point_name} -> ${plotPointPath}`);
+                
+                // 处理章节
+                if (chapters) {
+                  for (let chIdx = 0; chIdx < chapters.length; chIdx++) {
+                    const yamlChapter = chapters[chIdx];
+                    // 使用章节的全局索引，而不是循环索引
+                    const chapterPath = `${plotPointPath}/c${yamlChapter.chapter_index}`;
+                    
+                    // 提取章节的元数据
+                    const { chapter_name, chapter_index, ...chapterMetadata } = yamlChapter;
+                    
+                    // 创建章节节点
+                    this.data.chapters[chapterPath] = {
+                      type: 'chapter',
+                      title: chapter_name,
+                      index: chapter_index,
+                      metadata: chapterMetadata
+                    };
+                    
+                    await log(`Converted chapter: ${chapter_name} (${chapter_index}) -> ${chapterPath}`);
+                  }
+                }
               }
-            } else {
-              // 没有章节索引的情况，直接添加
-              target.push({...sourceChapter});
             }
-          });
-          
-          return target;
-        }
-        
-        // 合并其他类型的数组元素
-        source.forEach((item, index) => {
-          if (index >= target.length) {
-            target.push(typeof item === 'object' && item !== null ? deepMerge({}, item) : item);
-          } else {
-            target[index] = typeof item === 'object' && item !== null ? 
-              deepMerge(target[index] || {}, item) : item;
           }
-        });
-        
-        return target;
+        }
       }
       
-      // 如果源是对象
-      if (typeof source === 'object' && source !== null) {
-        if (typeof target !== 'object' || target === null || Array.isArray(target)) {
-          target = {};
-        }
-        
-        // 合并对象属性
-        Object.keys(source).forEach(key => {
-          const sourceValue = source[key];
-          
-          if (typeof sourceValue === 'object' && sourceValue !== null) {
-            // 递归合并嵌套对象或数组
-            target[key] = deepMerge(target[key] || (Array.isArray(sourceValue) ? [] : {}), sourceValue);
-          } else {
-            // 基本类型直接赋值
-            target[key] = sourceValue;
-          }
-        });
-        
-        return target;
-      }
-      
-      // 基本类型直接返回源
-      return source;
+      // 保存转换后的JSON
+      await this.saveData();
+      await log('YAML to JSON conversion completed successfully');
+      return true;
+    } catch (error) {
+      await log('Error during YAML to JSON conversion:', error);
+      console.error('Failed to convert YAML to JSON:', error);
+      return false;
     }
-
-    // 处理一次性添加完整大纲的情况
-    if (volumeIndex === undefined) {
-      outline.outline.push(newData);
-    } else if (volumeIndex >= 0) {
-      // 确保卷索引存在
-      while (outline.outline.length <= volumeIndex) {
-        outline.outline.push({});
-      }
-      
-      // 特殊处理添加act的情况
-      if (actIndex === undefined && newData.act_name) {
-        // 用户尝试添加act信息，确保acts数组存在
-        if (!outline.outline[volumeIndex].acts) {
-          outline.outline[volumeIndex].acts = [];
-        }
-        
-        // 将act信息添加到acts数组中
-        outline.outline[volumeIndex].acts.push(newData);
-      } else if (actIndex === undefined) {
-        // 在卷级别添加或合并数据
-        outline.outline[volumeIndex] = deepMerge(outline.outline[volumeIndex], newData);
-      } else if (actIndex >= 0) {
-        // 确保acts数组存在
-        if (!outline.outline[volumeIndex].acts) {
-          outline.outline[volumeIndex].acts = [];
-        }
-        
-        // 确保act索引存在
-        while (outline.outline[volumeIndex].acts.length <= actIndex) {
-          outline.outline[volumeIndex].acts.push({});
-        }
-        
-        // 特殊处理添加plot_point的情况
-        if (plotPointIndex === undefined && newData.plot_point_name) {
-          // 用户尝试添加情节点信息，确保plot_points数组存在
-          if (!outline.outline[volumeIndex].acts[actIndex].plot_points) {
-            outline.outline[volumeIndex].acts[actIndex].plot_points = [];
-          }
-          
-          // 将情节点信息添加到plot_points数组中
-          outline.outline[volumeIndex].acts[actIndex].plot_points.push(newData);
-        } else if (plotPointIndex === undefined) {
-          // 在幕级别添加或合并数据
-          outline.outline[volumeIndex].acts[actIndex] = deepMerge(
-            outline.outline[volumeIndex].acts[actIndex], 
-            newData
-          );
-        } else if (plotPointIndex >= 0) {
-          // 确保plot_points数组存在
-          if (!outline.outline[volumeIndex].acts[actIndex].plot_points) {
-            outline.outline[volumeIndex].acts[actIndex].plot_points = [];
-          }
-          
-          // 确保plotPoint索引存在
-          while (outline.outline[volumeIndex].acts[actIndex].plot_points.length <= plotPointIndex) {
-            outline.outline[volumeIndex].acts[actIndex].plot_points.push({});
-          }
-          
-          // 在情节点级别添加或合并数据
-          outline.outline[volumeIndex].acts[actIndex].plot_points[plotPointIndex] = deepMerge(
-            outline.outline[volumeIndex].acts[actIndex].plot_points[plotPointIndex],
-            newData
-          );
-        } else {
-          return false; // 无效的plotPointIndex
-        }
-      } else {
-        return false; // 无效的actIndex
-      }
-    } else {
-      return false; // 无效的volumeIndex
-    }
-
-    // 写入文件
-    await fs.writeFile(OUTLINE_FILE_PATH, yaml.dump(outline, { lineWidth: -1 }), 'utf-8');
-    return true;
-  } catch (error) {
-    console.error('添加大纲时出错:', error);
-    return false;
   }
 }
 
-// 导出所有工具函数
+// --- 实例化管理器 ---
+const outlineManager = new OutlineManager (OUTLINE_JSON_PATH);
+
+// --- 导出的工具函数 ---
+
+export async function getNode(path: string): Promise<(OutlineNode & { path: string }) | null> {
+  return outlineManager.getNode(path);
+}
+
+export async function getChildren(parentPath: string): Promise<(OutlineNode & { path: string })[]> {
+  return outlineManager.getChildren(parentPath);
+}
+
+export async function addNode(
+  parentPath: string, 
+  nodeData: Partial<OutlineNode> & { 
+    type: OutlineNode['type'], 
+    title: string, 
+    index?: number, 
+    metadata?: Record<string, any> 
+  }
+): Promise<string | null> {
+  return outlineManager.addNode(parentPath, nodeData);
+}
+
+export async function updateNode(path: string, newData: Partial<OutlineNode>): Promise<boolean> {
+  return outlineManager.updateNode(path, newData);
+}
+
+export async function deleteNode(path: string): Promise<boolean> {
+  return outlineManager.deleteNode(path);
+}
+
+export async function getVolumeInfoByPath(volumePath: string): Promise<(VolumeNode & { path: string }) | null> {
+  return outlineManager.getVolumeInfoByPath(volumePath);
+}
+
+export async function getChapterWindowByPath(centerChapterPath: string, windowSize: number = 2): Promise<(ChapterNode & { path: string })[]> {
+  return outlineManager.getChapterWindowByPath(centerChapterPath, windowSize);
+}
+
+export async function getChapterOutlineByPath(chapterPath: string): Promise<(ChapterNode & { path: string }) | null> {
+  return outlineManager.getChapterOutlineByPath(chapterPath);
+}
+
+export async function convertYAMLToJSON(): Promise<boolean> {
+  return outlineManager.convertYAMLToJSON();
+}
+
+// 导出一个工具集合
 export const outlineTools = {
-  getVolumeInfo,
-  getChapterOutlineWindow,
-  getChapterOutlineByIndex,
-  updateOutline,
-  addOutline
+  getNode,
+  getChildren,
+  addNode,
+  updateNode,
+  deleteNode,
+  getVolumeInfoByPath,
+  getChapterWindowByPath,
+  getChapterOutlineByPath,
+  convertYAMLToJSON
 };
 
-// 在文件末尾添加初始化日志
-log('模块导出完成');
+// 记录模块完成加载
+log('Module initialization complete (  Implementation)');
 
 export default outlineTools;
