@@ -275,7 +275,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         properties: {
           path: {
             type: "string",
-            description: "节点的唯一路径，例如 '/v1', '/v1/a1', '/v1/a1/p1', '/v1/a1/p1/c1'。对于章节节点，也可以直接使用章节索引，如 'c51' 或 '51'"
+            description: "节点的唯一路径，例如 '/v1', '/v1/a1', '/v1/a1/p1', '/v1/a1/p1/c1'。对于章节节点，请优先直接使用章节索引，如 'c51' 或 '51'"
           },
         },
         required: ["path"],
@@ -297,13 +297,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     },
     {
       name: "get_chapter_outline_window_by_path",
-      description: "获取指定章节及其前后N章的大纲信息（非章节全文），形成一个滑动窗口。返回章节的标题、索引、元数据等计划内容。",
+      description: "获取指定章节及其前后N章的大纲信息（非章节全文），形成一个滑动窗口。返回章节的标题、索引、元数据等计划内容。，获取章节信息请优先使用本工具，用户要求某一章节，windowSize为0",
       inputSchema: {
         type: "object",
         properties: {
           centerChapterPath: {
             type: "string",
-            description: "中心章节的引用，可以是章节索引(如'51'或'c51')或完整路径(如'/v1/a1/p1/c51')"
+            description: "中心章节的引用，可以是章节索引(如'51'或'c51')，非用户要求尽量不适用完整路径(如'/v1/a1/p1/c51')"
           },
           windowSize: {
             type: "number",
@@ -321,7 +321,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         properties: {
           path: {
             type: "string",
-            description: "要更新的节点的唯一路径，例如 '/v1/a1/p1/c1'。对于章节节点，也可以直接使用章节索引，如 'c51' 或 '51'"
+            description: "要更新的节点的唯一路径，例如 '/v1/a1/p1/c1'。对于章节节点，优先直接使用章节索引，如 'c51' 或 '51'"
           },
           newData: {
             type: "object",

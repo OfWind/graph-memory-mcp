@@ -119,7 +119,8 @@ class OutlineManager  {
   // --- 数据加载和保存 ---
   
   async loadData(): Promise<void> {
-    if (this.dataLoaded) return;
+    // 移除条件检查，强制每次都重新加载
+    // if (this.dataLoaded) return;
     
     await logOutline('Attempting to load outline data from JSON file.');
     try {
@@ -133,18 +134,21 @@ class OutlineManager  {
       this.data.plotPoints = this.data.plotPoints || {};
       this.data.chapters = this.data.chapters || {};
       
-      this.dataLoaded = true;
+      // 不再设置 dataLoaded 标志
+      // this.dataLoaded = true;
       await log('OUTLINE-MANAGER', 'Outline data loaded successfully.');
     } catch (error) {
       if (error instanceof Error && 'code' in error && (error as any).code === "ENOENT") {
         await log('OUTLINE-MANAGER', 'Outline file not found. Initializing with empty structure.');
         this.data = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
-        this.dataLoaded = true;
+        // 不再设置 dataLoaded 标志
+        // this.dataLoaded = true;
         await this.saveData(); // 创建空文件
       } else {
         await log('OUTLINE-MANAGER', 'Error loading outline data:', error);
         this.data = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
-        this.dataLoaded = true;
+        // 不再设置 dataLoaded 标志
+        // this.dataLoaded = true;
         console.error("Failed to load or initialize outline data. Using empty structure.", error);
       }
     }
