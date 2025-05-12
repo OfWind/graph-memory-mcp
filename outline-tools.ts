@@ -2,25 +2,14 @@ import { promises as fs } from 'fs';
 import * as yaml from 'js-yaml';
 import path from 'path';
 import { PATHS } from './storage-manager.js';
+import { log } from './logger.js';
 
 // --- 配置与常量 ---
-const OUTLINE_JSON_PATH = process.env.OUTLINE_JSON_PATH || PATHS.OUTLINE_JSON_FILE;
-const LOG_FILE_PATH = PATHS.OUTLINE_LOG_FILE;
+const OUTLINE_JSON_PATH = PATHS.OUTLINE_JSON_FILE;
 
 // --- 日志功能 ---
-async function log(message: string, data?: any) {
-  const timestamp = new Date().toISOString();
-  const logMessage = data
-    ? `${timestamp} [OUTLINE-TOOLS-V2] ${message}: ${JSON.stringify(data, null, 2)}`
-    : `${timestamp} [OUTLINE-TOOLS-V2] ${message}`;
-
-  console.log(logMessage);
-
-  try {
-    await fs.appendFile(LOG_FILE_PATH, logMessage + '\n');
-  } catch (err) {
-    console.error('Error writing to log file:', err);
-  }
+async function logOutline(message: string, data?: any) {
+  await log('OUTLINE-MANAGER', message, data);
 }
 
 // --- 接口定义 ---
@@ -124,7 +113,7 @@ class OutlineManager  {
   private dataLoaded = false;
 
   constructor(private filePath: string) {
-    log(`OutlineManager  initialized with file path: ${this.filePath}`);
+    logOutline(`OutlineManager initialized with file path: ${this.filePath}`);
   }
 
   // --- 数据加载和保存 ---
@@ -132,9 +121,9 @@ class OutlineManager  {
   async loadData(): Promise<void> {
     if (this.dataLoaded) return;
     
-    await log('Attempting to load outline data from JSON file.');
+    await logOutline('Attempting to load outline data from JSON file.');
     try {
-      await log(`Reading file: ${this.filePath}`);
+      await logOutline(`Reading file: ${this.filePath}`);
       const fileContent = await fs.readFile(this.filePath, 'utf8');
       this.data = JSON.parse(fileContent) as OutlineData ;
       
@@ -145,15 +134,15 @@ class OutlineManager  {
       this.data.chapters = this.data.chapters || {};
       
       this.dataLoaded = true;
-      await log('Outline data loaded successfully.');
+      await log('OUTLINE-MANAGER', 'Outline data loaded successfully.');
     } catch (error) {
       if (error instanceof Error && 'code' in error && (error as any).code === "ENOENT") {
-        await log('Outline file not found. Initializing with empty structure.');
+        await log('OUTLINE-MANAGER', 'Outline file not found. Initializing with empty structure.');
         this.data = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
         this.dataLoaded = true;
         await this.saveData(); // 创建空文件
       } else {
-        await log('Error loading outline data:', error);
+        await log('OUTLINE-MANAGER', 'Error loading outline data:', error);
         this.data = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
         this.dataLoaded = true;
         console.error("Failed to load or initialize outline data. Using empty structure.", error);
@@ -162,15 +151,15 @@ class OutlineManager  {
   }
 
   async saveData(): Promise<void> {
-    await log('Attempting to save outline data to JSON file.');
+    await log('OUTLINE-MANAGER', 'Attempting to save outline data to JSON file.');
     try {
       const directory = path.dirname(this.filePath);
       await fs.mkdir(directory, { recursive: true });
       const jsonContent = JSON.stringify(this.data, null, 2);
       await fs.writeFile(this.filePath, jsonContent, 'utf8');
-      await log('Outline data saved successfully.');
+      await log('OUTLINE-MANAGER', 'Outline data saved successfully.');
     } catch (error) {
-      await log('Error saving outline data:', error);
+      await log('OUTLINE-MANAGER', 'Error saving outline data:', error);
       console.error(`Error writing outline file: ${error}`);
       throw error;
     }
@@ -229,7 +218,7 @@ class OutlineManager  {
     const type = this.getNodeTypeFromPath(nodePath);
     
     if (!type) {
-      await log('getNode failed: Invalid path format', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'getNode failed: Invalid path format', { path: nodePath });
       return null;
     }
     
@@ -237,11 +226,11 @@ class OutlineManager  {
     const node = dictionary[nodePath];
     
     if (!node) {
-      await log('getNode failed: Node not found', { path: nodePath, type });
+      await log('OUTLINE-MANAGER', 'getNode failed: Node not found', { path: nodePath, type });
       return null;
     }
     
-    await log('getNode success', { path: nodePath });
+    await log('OUTLINE-MANAGER', 'getNode success', { path: nodePath });
     return { ...node, path: nodePath };
   }
 
@@ -261,7 +250,7 @@ class OutlineManager  {
       }
     }
     
-    await log('getChildren success', { parentPath, count: children.length });
+    await log('OUTLINE-MANAGER', 'getChildren success', { parentPath, count: children.length });
     return children;
   }
 
@@ -279,7 +268,7 @@ class OutlineManager  {
 
     // 验证父路径存在（除非在根目录添加卷）
     if (parentPath !== '/' && !(await this.getNode(parentPath))) {
-      await log('addNode failed: Parent path does not exist', { parentPath });
+      await log('OUTLINE-MANAGER', 'addNode failed: Parent path does not exist', { parentPath });
       return null;
     }
 
@@ -305,14 +294,14 @@ class OutlineManager  {
         expectedParentType = 'plot_point'; 
         break;
       default:
-        await log('addNode failed: Invalid node type specified', { type });
+        await log('OUTLINE-MANAGER', 'addNode failed: Invalid node type specified', { type });
         return null;
     }
 
     // 验证父节点类型
     const parentType = parentPath === '/' ? 'root' : this.getNodeTypeFromPath(parentPath);
     if (parentType !== expectedParentType) {
-      await log('addNode failed: Cannot add node type to this parent type', { 
+      await log('OUTLINE-MANAGER', 'addNode failed: Cannot add node type to this parent type', { 
         nodeType: type, 
         parentPath, 
         parentType, 
@@ -327,7 +316,7 @@ class OutlineManager  {
     if (type === 'chapter') {
       // 章节类型使用全局章节索引
       if (index === undefined) {
-        await log('addNode failed: Chapter index is required', { nodeData });
+        await log('OUTLINE-MANAGER', 'addNode failed: Chapter index is required', { nodeData });
         return null;
       }
       
@@ -337,7 +326,7 @@ class OutlineManager  {
       // 检查是否已存在此路径（可能在不同情节点下有相同索引的章节）
       const existingNode = this.data.chapters[newNodePath];
       if (existingNode) {
-        await log('addNode failed: Chapter path already exists', { 
+        await log('OUTLINE-MANAGER', 'addNode failed: Chapter path already exists', { 
           newNodePath, 
           existingChapter: existingNode.title,
           requestedChapter: title
@@ -365,7 +354,7 @@ class OutlineManager  {
     // 添加到正确的字典中
     const dictionary = this.getDictionaryByType(type);
     dictionary[newNodePath] = newNode;
-    await log('addNode success', { newNodePath, type });
+    await log('OUTLINE-MANAGER', 'addNode success', { newNodePath, type });
     await this.saveData(); // 成功添加后保存
     
     return newNodePath;
@@ -376,7 +365,7 @@ class OutlineManager  {
     const type = this.getNodeTypeFromPath(nodePath);
     
     if (!type) {
-      await log('updateNode failed: Invalid path format', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'updateNode failed: Invalid path format', { path: nodePath });
       return false;
     }
     
@@ -384,7 +373,7 @@ class OutlineManager  {
     const existingNode = dictionary[nodePath];
 
     if (!existingNode) {
-      await log('updateNode failed: Node not found', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'updateNode failed: Node not found', { path: nodePath });
       return false;
     }
 
@@ -410,7 +399,7 @@ class OutlineManager  {
       ...restNewData // 将其他字段合并到metadata
     };
 
-    await log('updateNode success', { path: nodePath });
+    await log('OUTLINE-MANAGER', 'updateNode success', { path: nodePath });
     await this.saveData();
     return true;
   }
@@ -420,21 +409,21 @@ class OutlineManager  {
     const type = this.getNodeTypeFromPath(nodePath);
     
     if (!type) {
-      await log('deleteNode failed: Invalid path format', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'deleteNode failed: Invalid path format', { path: nodePath });
       return false;
     }
     
     const dictionary = this.getDictionaryByType(type);
 
     if (!dictionary[nodePath]) {
-      await log('deleteNode failed: Node not found', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'deleteNode failed: Node not found', { path: nodePath });
       return false;
     }
 
     // 删除节点本身
     delete dictionary[nodePath];
     let deletedCount = 1;
-    await log('deleteNode: Deleted target node', { path: nodePath });
+    await log('OUTLINE-MANAGER', 'deleteNode: Deleted target node', { path: nodePath });
 
     // 递归删除子节点
     const prefixToDelete = nodePath + '/';
@@ -443,12 +432,12 @@ class OutlineManager  {
         if (path.startsWith(prefixToDelete)) {
           delete dict[path];
           deletedCount++;
-          await log('deleteNode: Deleted child node', { path });
+          await log('OUTLINE-MANAGER','deleteNode: Deleted child node', { path });
         }
       }
     }
 
-    await log('deleteNode success', { path: nodePath, totalDeleted: deletedCount });
+    await log('OUTLINE-MANAGER','deleteNode success', { path: nodePath, totalDeleted: deletedCount });
     await this.saveData();
     return true;
   }
@@ -463,11 +452,11 @@ class OutlineManager  {
   }
 
   async getChapterWindowByPath(centerChapterPath: string, windowSize: number = 2): Promise<(ChapterNode & { path: string })[]> {
-    await log(`Getting chapter window by path - Center: ${centerChapterPath}, Size: ${windowSize}`);
+    await log('OUTLINE-MANAGER',`Getting chapter window by path - Center: ${centerChapterPath}, Size: ${windowSize}`);
     const type = this.getNodeTypeFromPath(centerChapterPath);
     
     if (type !== 'chapter') {
-      await log('getChapterWindowByPath failed: Path is not a chapter path', { centerChapterPath });
+      await log('OUTLINE-MANAGER','getChapterWindowByPath failed: Path is not a chapter path', { centerChapterPath });
       return [];
     }
 
@@ -475,7 +464,7 @@ class OutlineManager  {
     const centerIndexInArray = allChaptersSorted.findIndex(ch => ch.path === centerChapterPath);
 
     if (centerIndexInArray === -1) {
-      await log('getChapterWindowByPath failed: Center chapter path not found in sorted list', { centerChapterPath });
+      await log('OUTLINE-MANAGER','getChapterWindowByPath failed: Center chapter path not found in sorted list', { centerChapterPath });
       return [];
     }
 
@@ -483,7 +472,7 @@ class OutlineManager  {
     const endIndex = Math.min(allChaptersSorted.length - 1, centerIndexInArray + windowSize);
     const result = allChaptersSorted.slice(startIndex, endIndex + 1);
 
-    await log('getChapterWindowByPath success', { 
+    await log('OUTLINE-MANAGER','getChapterWindowByPath success', { 
       centerChapterPath, 
       windowSize, 
       count: result.length, 
@@ -494,26 +483,26 @@ class OutlineManager  {
   }
 
   async getVolumeInfoByPath(volumePath: string): Promise<(VolumeNode & { path: string }) | null> {
-    await log(`Getting volume info by path: ${volumePath}`);
+    await log('OUTLINE-MANAGER',`Getting volume info by path: ${volumePath}`);
     const node = await this.getNode(volumePath);
     
     if (node && node.type === 'volume') {
       return node as (VolumeNode & { path: string });
     }
     
-    await log('getVolumeInfoByPath failed: Node not found or not a volume', { volumePath });
+    await log('OUTLINE-MANAGER','getVolumeInfoByPath failed: Node not found or not a volume', { volumePath });
     return null;
   }
 
   async getChapterOutlineByPath(chapterPath: string): Promise<(ChapterNode & { path: string }) | null> {
-    await log(`Getting chapter outline by path: ${chapterPath}`);
+    await log('OUTLINE-MANAGER',`Getting chapter outline by path: ${chapterPath}`);
     const node = await this.getNode(chapterPath);
     
     if (node && node.type === 'chapter') {
       return node as (ChapterNode & { path: string });
     }
     
-    await log('getChapterOutlineByPath failed: Node not found or not a chapter', { chapterPath });
+    await log('OUTLINE-MANAGER','getChapterOutlineByPath failed: Node not found or not a chapter', { chapterPath });
     return null;
   }
   
@@ -521,12 +510,12 @@ class OutlineManager  {
   
   // 处理YAML转换中的文件路径
   async convertYAMLToJSON(): Promise<boolean> {
-    await log('Starting YAML to JSON conversion');
+    await log('OUTLINE-MANAGER','Starting YAML to JSON conversion');
     
     try {
       // 读取YAML文件
       const yamlFilePath = process.env.OUTLINE_FILE_PATH || PATHS.OUTLINE_JSON_FILE;
-      await log(`Reading YAML from: ${yamlFilePath}`);
+      await log('OUTLINE-MANAGER',`Reading YAML from: ${yamlFilePath}`);
       
       const fileContent = await fs.readFile(yamlFilePath, 'utf8');
       const yamlData = yaml.load(fileContent) as YamlOutline;
@@ -549,7 +538,7 @@ class OutlineManager  {
           metadata: volumeMetadata
         };
         
-        await log(`Converted volume: ${volume} -> ${volumePath}`);
+        await log('OUTLINE-MANAGER',`Converted volume: ${volume} -> ${volumePath}`);
         
         // 处理幕
         if (acts) {
@@ -567,7 +556,7 @@ class OutlineManager  {
               metadata: actMetadata
             };
             
-            await log(`Converted act: ${act_name} -> ${actPath}`);
+            await log('OUTLINE-MANAGER',`Converted act: ${act_name} -> ${actPath}`);
             
             // 处理情节点
             if (plot_points) {
@@ -585,7 +574,7 @@ class OutlineManager  {
                   metadata: plotPointMetadata
                 };
                 
-                await log(`Converted plot point: ${plot_point_name} -> ${plotPointPath}`);
+                await log('OUTLINE-MANAGER',`Converted plot point: ${plot_point_name} -> ${plotPointPath}`);
                 
                 // 处理章节
                 if (chapters) {
@@ -605,7 +594,7 @@ class OutlineManager  {
                       metadata: chapterMetadata
                     };
                     
-                    await log(`Converted chapter: ${chapter_name} (${chapter_index}) -> ${chapterPath}`);
+                    await log('OUTLINE-MANAGER',`Converted chapter: ${chapter_name} (${chapter_index}) -> ${chapterPath}`);
                   }
                 }
               }
@@ -616,7 +605,7 @@ class OutlineManager  {
       
       // 保存转换后的JSON
       await this.saveData();
-      await log('YAML to JSON conversion completed successfully');
+      await log('OUTLINE-MANAGER','YAML to JSON conversion completed successfully');
       return true;
     } catch (error) {
       await log('Error during YAML to JSON conversion:', error);
@@ -689,6 +678,6 @@ export const outlineTools = {
 };
 
 // 记录模块完成加载
-log('Module initialization complete (  Implementation)');
+log('OUTLINE-MANAGER','Module initialization complete (  Implementation)');
 
 export default outlineTools;

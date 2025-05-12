@@ -23,8 +23,8 @@ export const PATHS = {
   // 场景描述文件
   SCENE_DESCRIPTION_FILE: path.join(STORAGE_DIR, 'scene-descriptions.json'),
   
-  // 日志文件
-  OUTLINE_LOG_FILE: path.join(STORAGE_DIR, 'mcp-graph-tools.log')
+  // 日志文件目录
+  LOG_FILE: path.join(STORAGE_DIR, 'logs')
 };
 
 /**

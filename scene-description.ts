@@ -166,7 +166,8 @@ class SceneDescriptionManager {
 }
 
 // 使用统一的路径
-const sceneDescriptionFilePath = process.env.SCENE_DESCRIPTION_PATH || PATHS.SCENE_DESCRIPTION_FILE;
+const sceneDescriptionFilePath = PATHS.SCENE_DESCRIPTION_FILE;
+// const sceneDescriptionFilePath = process.env.SCENE_DESCRIPTION_PATH || PATHS.SCENE_DESCRIPTION_FILE;
 
 // 创建导出的单例实例
 export const sceneDescriptionManager = new SceneDescriptionManager(sceneDescriptionFilePath);

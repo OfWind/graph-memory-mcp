@@ -113,7 +113,8 @@ class ChapterSummaryManager {
 }
 
 // 使用统一的路径
-const summaryFilePath = process.env.CHAPTER_SUMMARY_PATH || PATHS.CHAPTER_SUMMARY_FILE;
+const summaryFilePath = PATHS.CHAPTER_SUMMARY_FILE;
+// const summaryFilePath = process.env.CHAPTER_SUMMARY_PATH || PATHS.CHAPTER_SUMMARY_FILE;
 
 // 创建导出的单例实例
 export const chapterSummaryManager = new ChapterSummaryManager(summaryFilePath);
