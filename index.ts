@@ -275,7 +275,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         properties: {
           path: {
             type: "string",
-            description: "节点的唯一路径，例如 '/v1', '/v1/a1', '/v1/a1/p1', '/v1/a1/p1/c1'"
+            description: "节点的唯一路径，例如 '/v1', '/v1/a1', '/v1/a1/p1', '/v1/a1/p1/c1'。对于章节节点，也可以直接使用章节索引，如 'c51' 或 '51'"
           },
         },
         required: ["path"],
@@ -297,13 +297,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     },
     {
       name: "get_chapter_outline_window_by_path",
-      description: "获取指定章节路径及其前后N章的大纲信息（非章节全文），形成一个滑动窗口。返回章节的标题、索引、元数据等计划内容。",
+      description: "获取指定章节及其前后N章的大纲信息（非章节全文），形成一个滑动窗口。返回章节的标题、索引、元数据等计划内容。",
       inputSchema: {
         type: "object",
         properties: {
           centerChapterPath: {
             type: "string",
-            description: "中心章节的唯一路径，例如 '/v1/a1/p1/c5'"
+            description: "中心章节的引用，可以是章节索引(如'51'或'c51')或完整路径(如'/v1/a1/p1/c51')"
           },
           windowSize: {
             type: "number",
@@ -321,7 +321,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         properties: {
           path: {
             type: "string",
-            description: "要更新的节点的唯一路径，例如 '/v1/a1/p1/c1'"
+            description: "要更新的节点的唯一路径，例如 '/v1/a1/p1/c1'。对于章节节点，也可以直接使用章节索引，如 'c51' 或 '51'"
           },
           newData: {
             type: "object",
@@ -364,7 +364,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         properties: {
           path: {
             type: "string",
-            description: "要删除的节点的唯一路径，例如 '/v1/a1/p1/c1' 或 '/v1/a1'"
+            description: "要删除的节点的唯一路径，例如 '/v1/a1/p1/c1' 或 '/v1/a1'。对于章节节点，也可以直接使用章节索引，如 'c51' 或 '51'"
           },
         },
         required: ["path"],
@@ -677,15 +677,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             type: "text",
             text: JSON.stringify({ 
               success: await outlineTools.deleteNode(args.path as string) 
-            }, null, 2)
-          }]
-        };
-      case "convert_yaml_to_json":
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({ 
-              success: await outlineTools.convertYAMLToJSON() 
             }, null, 2)
           }]
         };

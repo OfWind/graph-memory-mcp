@@ -215,23 +215,36 @@ class OutlineManager  {
   
   async getNode(nodePath: string): Promise<(OutlineNode & { path: string }) | null> {
     await this.loadData();
-    const type = this.getNodeTypeFromPath(nodePath);
+    
+    // 处理可能的章节索引引用
+    let resolvedPath = nodePath;
+    if (/^c?\d+$/.test(nodePath)) {
+      const chapterPath = await this.resolveChapterReference(nodePath);
+      if (chapterPath) {
+        resolvedPath = chapterPath;
+      } else {
+        await log('OUTLINE-MANAGER', 'getNode failed: Cannot resolve chapter reference', { reference: nodePath });
+        return null;
+      }
+    }
+    
+    const type = this.getNodeTypeFromPath(resolvedPath);
     
     if (!type) {
-      await log('OUTLINE-MANAGER', 'getNode failed: Invalid path format', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'getNode failed: Invalid path format', { path: resolvedPath });
       return null;
     }
     
     const dictionary = this.getDictionaryByType(type);
-    const node = dictionary[nodePath];
+    const node = dictionary[resolvedPath];
     
     if (!node) {
-      await log('OUTLINE-MANAGER', 'getNode failed: Node not found', { path: nodePath, type });
+      await log('OUTLINE-MANAGER', 'getNode failed: Node not found', { path: resolvedPath });
       return null;
     }
     
-    await log('OUTLINE-MANAGER', 'getNode success', { path: nodePath });
-    return { ...node, path: nodePath };
+    await log('OUTLINE-MANAGER', 'getNode success', { path: resolvedPath });
+    return { ...node, path: resolvedPath };
   }
 
   async getChildren(parentPath: string): Promise<(OutlineNode & { path: string })[]> {
@@ -362,18 +375,32 @@ class OutlineManager  {
 
   async updateNode(nodePath: string, newData: Partial<OutlineNode>): Promise<boolean> {
     await this.loadData();
-    const type = this.getNodeTypeFromPath(nodePath);
+    
+    // 处理可能的章节索引引用
+    let resolvedPath = nodePath;
+    if (/^c?\d+$/.test(nodePath)) {
+      const chapterPath = await this.resolveChapterReference(nodePath);
+      if (chapterPath) {
+        resolvedPath = chapterPath;
+      } else {
+        await log('OUTLINE-MANAGER', 'updateNode failed: Cannot resolve chapter reference', { reference: nodePath });
+        return false;
+      }
+    }
+    
+    // 使用原有逻辑
+    const type = this.getNodeTypeFromPath(resolvedPath);
     
     if (!type) {
-      await log('OUTLINE-MANAGER', 'updateNode failed: Invalid path format', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'updateNode failed: Invalid path format', { path: resolvedPath });
       return false;
     }
     
     const dictionary = this.getDictionaryByType(type);
-    const existingNode = dictionary[nodePath];
+    const existingNode = dictionary[resolvedPath];
 
     if (!existingNode) {
-      await log('OUTLINE-MANAGER', 'updateNode failed: Node not found', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'updateNode failed: Node not found', { path: resolvedPath });
       return false;
     }
 
@@ -399,34 +426,48 @@ class OutlineManager  {
       ...restNewData // 将其他字段合并到metadata
     };
 
-    await log('OUTLINE-MANAGER', 'updateNode success', { path: nodePath });
+    await log('OUTLINE-MANAGER', 'updateNode success', { path: resolvedPath });
     await this.saveData();
     return true;
   }
 
   async deleteNode(nodePath: string): Promise<boolean> {
     await this.loadData();
-    const type = this.getNodeTypeFromPath(nodePath);
+    
+    // 处理可能的章节索引引用
+    let resolvedPath = nodePath;
+    if (/^c?\d+$/.test(nodePath)) {
+      const chapterPath = await this.resolveChapterReference(nodePath);
+      if (chapterPath) {
+        resolvedPath = chapterPath;
+      } else {
+        await log('OUTLINE-MANAGER', 'deleteNode failed: Cannot resolve chapter reference', { reference: nodePath });
+        return false;
+      }
+    }
+    
+    // 使用原有逻辑
+    const type = this.getNodeTypeFromPath(resolvedPath);
     
     if (!type) {
-      await log('OUTLINE-MANAGER', 'deleteNode failed: Invalid path format', { path: nodePath });
+      await log('OUTLINE-MANAGER', 'deleteNode failed: Invalid path format', { path: resolvedPath });
       return false;
     }
     
     const dictionary = this.getDictionaryByType(type);
 
-    if (!dictionary[nodePath]) {
-      await log('OUTLINE-MANAGER', 'deleteNode failed: Node not found', { path: nodePath });
+    if (!dictionary[resolvedPath]) {
+      await log('OUTLINE-MANAGER', 'deleteNode failed: Node not found', { path: resolvedPath });
       return false;
     }
 
     // 删除节点本身
-    delete dictionary[nodePath];
+    delete dictionary[resolvedPath];
     let deletedCount = 1;
-    await log('OUTLINE-MANAGER', 'deleteNode: Deleted target node', { path: nodePath });
+    await log('OUTLINE-MANAGER', 'deleteNode: Deleted target node', { path: resolvedPath });
 
     // 递归删除子节点
-    const prefixToDelete = nodePath + '/';
+    const prefixToDelete = resolvedPath + '/';
     for (const dict of [this.data.volumes, this.data.acts, this.data.plotPoints, this.data.chapters]) {
       for (const path in dict) {
         if (path.startsWith(prefixToDelete)) {
@@ -437,7 +478,7 @@ class OutlineManager  {
       }
     }
 
-    await log('OUTLINE-MANAGER','deleteNode success', { path: nodePath, totalDeleted: deletedCount });
+    await log('OUTLINE-MANAGER','deleteNode success', { path: resolvedPath, totalDeleted: deletedCount });
     await this.saveData();
     return true;
   }
@@ -451,20 +492,33 @@ class OutlineManager  {
     return chapters;
   }
 
-  async getChapterWindowByPath(centerChapterPath: string, windowSize: number = 2): Promise<(ChapterNode & { path: string })[]> {
-    await log('OUTLINE-MANAGER',`Getting chapter window by path - Center: ${centerChapterPath}, Size: ${windowSize}`);
-    const type = this.getNodeTypeFromPath(centerChapterPath);
+  async getChapterWindowByPath(centerChapterRef: string, windowSize: number = 2): Promise<(ChapterNode & { path: string })[]> {
+    await log('OUTLINE-MANAGER', `Getting chapter window by reference - Center: ${centerChapterRef}, Size: ${windowSize}`);
     
+    // 解析章节引用（可以是索引或完整路径）
+    let centerChapterPath = centerChapterRef;
+    if (/^c?\d+$/.test(centerChapterRef)) {
+      const resolvedPath = await this.resolveChapterReference(centerChapterRef);
+      if (resolvedPath) {
+        centerChapterPath = resolvedPath;
+      } else {
+        await log('OUTLINE-MANAGER', 'getChapterWindowByPath failed: Cannot resolve chapter reference', { reference: centerChapterRef });
+        return [];
+      }
+    }
+    
+    const type = this.getNodeTypeFromPath(centerChapterPath);
     if (type !== 'chapter') {
-      await log('OUTLINE-MANAGER','getChapterWindowByPath failed: Path is not a chapter path', { centerChapterPath });
+      await log('OUTLINE-MANAGER', 'getChapterWindowByPath failed: Path is not a chapter path', { centerChapterPath });
       return [];
     }
 
+    // 使用原有逻辑
     const allChaptersSorted = await this.getAllChaptersSorted();
     const centerIndexInArray = allChaptersSorted.findIndex(ch => ch.path === centerChapterPath);
 
     if (centerIndexInArray === -1) {
-      await log('OUTLINE-MANAGER','getChapterWindowByPath failed: Center chapter path not found in sorted list', { centerChapterPath });
+      await log('OUTLINE-MANAGER', 'getChapterWindowByPath failed: Center chapter path not found in sorted list', { centerChapterPath });
       return [];
     }
 
@@ -472,7 +526,7 @@ class OutlineManager  {
     const endIndex = Math.min(allChaptersSorted.length - 1, centerIndexInArray + windowSize);
     const result = allChaptersSorted.slice(startIndex, endIndex + 1);
 
-    await log('OUTLINE-MANAGER','getChapterWindowByPath success', { 
+    await log('OUTLINE-MANAGER', 'getChapterWindowByPath success', { 
       centerChapterPath, 
       windowSize, 
       count: result.length, 
@@ -494,125 +548,56 @@ class OutlineManager  {
     return null;
   }
 
-  async getChapterOutlineByPath(chapterPath: string): Promise<(ChapterNode & { path: string }) | null> {
-    await log('OUTLINE-MANAGER',`Getting chapter outline by path: ${chapterPath}`);
-    const node = await this.getNode(chapterPath);
+  // --- 修改获取章节信息的方法 ---
+  async getChapterOutlineByPath(chapterRef: string): Promise<(ChapterNode & { path: string }) | null> {
+    await log('OUTLINE-MANAGER', `Getting chapter outline by reference: ${chapterRef}`);
+    
+    // 解析章节引用并获取节点
+    const node = await this.getNode(chapterRef);
     
     if (node && node.type === 'chapter') {
       return node as (ChapterNode & { path: string });
     }
     
-    await log('OUTLINE-MANAGER','getChapterOutlineByPath failed: Node not found or not a chapter', { chapterPath });
+    await log('OUTLINE-MANAGER', 'getChapterOutlineByPath failed: Node not found or not a chapter', { chapterRef });
     return null;
   }
   
-  // --- 导入/迁移功能 ---
-  
-  // 处理YAML转换中的文件路径
-  async convertYAMLToJSON(): Promise<boolean> {
-    await log('OUTLINE-MANAGER','Starting YAML to JSON conversion');
-    
-    try {
-      // 读取YAML文件
-      const yamlFilePath = process.env.OUTLINE_FILE_PATH || PATHS.OUTLINE_JSON_FILE;
-      await log('OUTLINE-MANAGER',`Reading YAML from: ${yamlFilePath}`);
-      
-      const fileContent = await fs.readFile(yamlFilePath, 'utf8');
-      const yamlData = yaml.load(fileContent) as YamlOutline;
-      
-      // 重置现有数据
-      this.data = { volumes: {}, acts: {}, plotPoints: {}, chapters: {} };
-      
-      // 处理卷
-      for (let volIdx = 0; volIdx < yamlData.outline.length; volIdx++) {
-        const yamlVolume = yamlData.outline[volIdx];
-        const volumePath = `/v${volIdx + 1}`;
-        
-        // 提取卷的元数据
-        const { volume, acts, ...volumeMetadata } = yamlVolume;
-        
-        // 创建卷节点
-        this.data.volumes[volumePath] = {
-          type: 'volume',
-          title: volume,
-          metadata: volumeMetadata
-        };
-        
-        await log('OUTLINE-MANAGER',`Converted volume: ${volume} -> ${volumePath}`);
-        
-        // 处理幕
-        if (acts) {
-          for (let actIdx = 0; actIdx < acts.length; actIdx++) {
-            const yamlAct = acts[actIdx];
-            const actPath = `${volumePath}/a${actIdx + 1}`;
-            
-            // 提取幕的元数据
-            const { act_name, plot_points, ...actMetadata } = yamlAct;
-            
-            // 创建幕节点
-            this.data.acts[actPath] = {
-              type: 'act',
-              title: act_name,
-              metadata: actMetadata
-            };
-            
-            await log('OUTLINE-MANAGER',`Converted act: ${act_name} -> ${actPath}`);
-            
-            // 处理情节点
-            if (plot_points) {
-              for (let ppIdx = 0; ppIdx < plot_points.length; ppIdx++) {
-                const yamlPlotPoint = plot_points[ppIdx];
-                const plotPointPath = `${actPath}/p${ppIdx + 1}`;
-                
-                // 提取情节点的元数据
-                const { plot_point_name, chapters, ...plotPointMetadata } = yamlPlotPoint;
-                
-                // 创建情节点节点
-                this.data.plotPoints[plotPointPath] = {
-                  type: 'plot_point',
-                  title: plot_point_name,
-                  metadata: plotPointMetadata
-                };
-                
-                await log('OUTLINE-MANAGER',`Converted plot point: ${plot_point_name} -> ${plotPointPath}`);
-                
-                // 处理章节
-                if (chapters) {
-                  for (let chIdx = 0; chIdx < chapters.length; chIdx++) {
-                    const yamlChapter = chapters[chIdx];
-                    // 使用章节的全局索引，而不是循环索引
-                    const chapterPath = `${plotPointPath}/c${yamlChapter.chapter_index}`;
-                    
-                    // 提取章节的元数据
-                    const { chapter_name, chapter_index, ...chapterMetadata } = yamlChapter;
-                    
-                    // 创建章节节点
-                    this.data.chapters[chapterPath] = {
-                      type: 'chapter',
-                      title: chapter_name,
-                      index: chapter_index,
-                      metadata: chapterMetadata
-                    };
-                    
-                    await log('OUTLINE-MANAGER',`Converted chapter: ${chapter_name} (${chapter_index}) -> ${chapterPath}`);
-                  }
-                }
-              }
-            }
-          }
-        }
+  // --- 根据索引查找章节路径的辅助方法 ---
+  private async getChapterPathByIndex(chapterIndex: number): Promise<string | null> {
+    await this.loadData();
+    for (const [path, chapter] of Object.entries(this.data.chapters)) {
+      if (chapter.index === chapterIndex) {
+        return path;
       }
-      
-      // 保存转换后的JSON
-      await this.saveData();
-      await log('OUTLINE-MANAGER','YAML to JSON conversion completed successfully');
-      return true;
-    } catch (error) {
-      await log('Error during YAML to JSON conversion:', error);
-      console.error('Failed to convert YAML to JSON:', error);
-      return false;
     }
+    return null;
   }
+
+  // --- 解析章节引用的辅助方法 ---
+  private async resolveChapterReference(chapterRef: string): Promise<string | null> {
+    // 处理直接是数字的情况，如 "51"
+    if (/^\d+$/.test(chapterRef)) {
+      const index = parseInt(chapterRef, 10);
+      return await this.getChapterPathByIndex(index);
+    } 
+    // 处理 "cXX" 格式的情况，如 "c51"
+    else if (/^c\d+$/.test(chapterRef)) {
+      const index = parseInt(chapterRef.substring(1), 10);
+      return await this.getChapterPathByIndex(index);
+    }
+    // 如果是完整路径，检查是否存在
+    else if (this.getNodeTypeFromPath(chapterRef) === 'chapter') {
+      if (this.data.chapters[chapterRef]) {
+        return chapterRef;
+      }
+    }
+    return null;
+  }
+
+
+
+
 }
 
 // --- 实例化管理器 ---
@@ -660,10 +645,6 @@ export async function getChapterOutlineByPath(chapterPath: string): Promise<(Cha
   return outlineManager.getChapterOutlineByPath(chapterPath);
 }
 
-export async function convertYAMLToJSON(): Promise<boolean> {
-  return outlineManager.convertYAMLToJSON();
-}
-
 // 导出一个工具集合
 export const outlineTools = {
   getNode,
@@ -674,7 +655,6 @@ export const outlineTools = {
   getVolumeInfoByPath,
   getChapterWindowByPath,
   getChapterOutlineByPath,
-  convertYAMLToJSON
 };
 
 // 记录模块完成加载
